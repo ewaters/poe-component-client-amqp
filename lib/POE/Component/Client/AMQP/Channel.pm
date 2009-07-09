@@ -107,16 +107,18 @@ sub queue {
                     $queue->created()
                 },
             },
-            Net::AMQP::Protocol::Queue::Declare->new(
-                ticket      => 0,
-                queue       => $name,
-                passive     => 0, # if set, server will not create the queue; checks for existance
-                durable     => 0, # will remain active after restart
-                exclusive   => 1, # may only be consumed from the current connection
-                auto_delete => 1, # queue is deleted after the last consumer
-                nowait      => 0, # do not send a DeclareOk response
-                arguments   => {},
-            )
+            Net::AMQP::Frame::Method->new(
+                method_frame => Net::AMQP::Protocol::Queue::Declare->new(
+                    ticket      => 0,
+                    queue       => $name,
+                    #passive     => 0, # if set, server will not create the queue; checks for existance
+                    #durable     => 0, # will remain active after restart
+                    exclusive   => 1, # may only be consumed from the current connection
+                    auto_delete => 1, # queue is deleted after the last consumer
+                    #nowait      => 0, # do not send a DeclareOk response
+                    #arguments   => {},
+                ),
+            ),
         );
         
         $self->{queues}{$name} = $queue;
@@ -150,14 +152,15 @@ sub server_input {
 sub server_send {
     my ($self, $kernel, @output) = @_[OBJECT, KERNEL, ARG0 .. $#_];
 
-    #print STDERR "Server_send: " . Dumper(\@output);
-
     my $opts = {};
     if (defined $output[0] && ref $output[0] && ref $output[0] eq 'HASH') {
         $opts = shift @output;
     }
 
-    $opts->{channel} = $self->id;
+    # Override the channel on each frame with my own channel id
+    foreach my $frame (@output) {
+        $frame->channel($self->id);
+    }
 
     # Pass through to the server session
     $kernel->post($self->{server}{Alias}, server_send => $opts, @output);

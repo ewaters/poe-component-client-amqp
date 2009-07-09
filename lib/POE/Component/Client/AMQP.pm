@@ -41,10 +41,12 @@ use POE qw(
 );
 use Params::Validate qw(validate_with);
 use Data::Dumper;
+use YAML::XS qw(Dump);
 use bytes;
-use Net::AMQP::Protocol;
+use Net::AMQP;
 use Net::AMQP::Common qw(:all);
 use Scalar::Util qw(blessed);
+use Carp;
 
 our $VERSION = 0.1;
 
@@ -114,12 +116,18 @@ sub channel_create {
     # Request the AMQP creation of the channel
 
     $poe_kernel->post($channel->{Alias}, server_send =>
-        Net::AMQP::Protocol::Channel::Open->new(
-            out_of_band => '',
+        Net::AMQP::Frame::Method->new(
+            method_frame => Net::AMQP::Protocol::Channel::Open->new(),
         ),
     );
 
     return $channel;
+}
+
+sub channel {
+    my ($self, $id) = @_;
+
+    return POE::Component::Client::AMQP::Channel->find_or_create($id, $self);
 }
 
 ## POE States ###
@@ -142,55 +150,53 @@ sub server_send {
     $opts->{channel} ||= 0;
 
     while (my $output = shift @output) {
-        if ($output->isa('Net::AMQP::Protocol::Base')) {
-
-            # Copy it since we're reusing the same data for each message sent in this block
-            my %opts = %$opts;
-
-            if ($output->isa('Net::AMQP::Protocol::BaseHeader')) {
-                my $extra_opts = $output->raw_frame_options;
-                $opts{$_} = $extra_opts->{$_} foreach keys %$extra_opts;
-            }
-            elsif ($output->isa('Net::AMQP::Protocol::BaseMethod') && $output->method_spec->{synchronous}) {
-                # If we're calling a synchronous method, then the server won't send any other
-                # synchronous replies of particular type(s) until this message is replied to.
-                # Wait for replies of these type(s) and don't send other messages until they're
-                # cleared.
-
-                my $output_class = ref($output);
-
-                # FIXME: It appears that RabbitMQ won't let us do two disimilar synchronous requests at once
-                if (my @waiting_classes = keys %{ $self->{wait_synchronous} }) {
-                    $self->{Logger}->debug("Class $waiting_classes[0] is already waiting; do nothing else until it's complete; defering");
-                    push @{ $self->{wait_synchronous}{$waiting_classes[0]}{process_after} }, [ \%opts, $output, @output ];
-                    return;
-                }
-
-                if ($self->{wait_synchronous}{$output_class}) {
-                    # There are already other things waiting; enqueue this output
-                    $self->{Logger}->debug("Class $output_class is already synchronously waiting; defering this and subsequent output");
-                    push @{ $self->{wait_synchronous}{$output_class}{process_after} }, [ \%opts, $output, @output ];
-                    return;
-                }
-
-                my $responses = $output_class->method_spec->{responses};
-
-                if (keys %$responses) {
-                    $self->{Logger}->debug("Setting up synchronous callback for $output_class");
-                    $self->{wait_synchronous}{$output_class} = {
-                        request  => $output,
-                        callback => $opts{synchronous_callback}, # optional
-                        channel  => $opts{channel},
-                        responses => $responses,
-                        process_after => [],
-                    };
-                }
-            }
-
-            $self->{Logger}->debug("Sending to channel $opts{channel}: ".Dumper($output, \%opts));
-            $output = $output->to_raw_frame(\%opts);
-            #print STDERR "   raw [".length($output)."]: \r\n".show_invis($output) . "\n\n";
+        if (! $output->isa("Net::AMQP::Frame")) {
+            $self->{Logger}->error("Invalid type out server output:\n".Dump($output));
+            next;
         }
+
+        if ($output->isa('Net::AMQP::Frame::Method') && $output->method_frame->method_spec->{synchronous}) {
+            # If we're calling a synchronous method, then the server won't send any other
+            # synchronous replies of particular type(s) until this message is replied to.
+            # Wait for replies of these type(s) and don't send other messages until they're
+            # cleared.
+
+            my $output_class = ref($output->method_frame);
+
+            # FIXME: It appears that RabbitMQ won't let us do two disimilar synchronous requests at once
+            if (my @waiting_classes = keys %{ $self->{wait_synchronous} }) {
+                $self->{Logger}->debug("Class $waiting_classes[0] is already waiting; do nothing else until it's complete; defering");
+                push @{ $self->{wait_synchronous}{$waiting_classes[0]}{process_after} }, [ $opts, $output, @output ];
+                return;
+            }
+
+            if ($self->{wait_synchronous}{$output_class}) {
+                # There are already other things waiting; enqueue this output
+                $self->{Logger}->debug("Class $output_class is already synchronously waiting; defering this and subsequent output");
+                push @{ $self->{wait_synchronous}{$output_class}{process_after} }, [ $opts, $output, @output ];
+                return;
+            }
+
+            my $responses = $output_class->method_spec->{responses};
+
+            if (keys %$responses) {
+                $self->{Logger}->debug("Setting up synchronous callback for $output_class");
+                $self->{wait_synchronous}{$output_class} = {
+                    request  => $output,
+                    callback => $opts->{synchronous_callback}, # optional
+                    responses => $responses,
+                    process_after => [],
+                };
+            }
+        }
+
+        my $raw_output = $output->to_raw_frame();
+        $self->{Logger}->debug(
+            "Sending to channel ".$output->channel.": \n"
+            . Dump($output)
+            . "raw [".length($raw_output)."]: ".show_invis($raw_output)
+        );
+        $output = $raw_output;
 
         $self->{HeapTCP}{server}->put($output);
     }
@@ -227,79 +233,96 @@ sub tcp_server_input {
     my $self = shift;
     my ($kernel, $heap, $input) = @_[KERNEL, HEAP, ARG0];
 
-    #$self->{Logger}->debug("Server said [".length($input)."]: $input");
+    #$self->{Logger}->debug("Server said [".length($input)."]: ".show_invis($input));
 
-    my $input_parsed = Net::AMQP::Protocol->parse_raw_frame(\$input);
-    my $frame = $input_parsed->{method_frame};
+    my @frames = Net::AMQP->parse_raw_frames(\$input);
+    FRAMES:
+    foreach my $frame (@frames) {
 
-    if ($frame) {
-        $self->{Logger}->debug("Server sent frame on channel $$input_parsed{channel}: " . Dumper($frame));
+        $self->{Logger}->debug("Server sent frame on channel ".$frame->channel.": \n".Dump($frame));
 
-        # Check the 'wait_synchronous' hash to see if this response is a synchronous reply
-        my $frame_class = ref $frame;
-        if ($frame_class->method_spec->{synchronous}) {
-            #$self->{Logger}->debug("Checking wait_synchronous against $frame_class: " . Dumper($self->{wait_synchronous}));
-            my $matching_output_class;
-            while (my ($output_class, $details) = each %{ $self->{wait_synchronous} }) {
-                next unless $details->{responses}{ $frame_class };
-                $matching_output_class = $output_class;
-                last;
-            }
-            if ($matching_output_class) {
-                $self->{Logger}->debug("Response type '$frame_class' found from waiting request '$matching_output_class'");
-                my $details = delete $self->{wait_synchronous}{$matching_output_class};
-                if (my $callback = delete $details->{callback}) {
-                    $self->{Logger}->debug("Calling $matching_output_class callback");
-                    $callback->();
+        if ($frame->isa('Net::AMQP::Frame::Method')) {
+            my $method_frame = $frame->method_frame;
+
+            # Check the 'wait_synchronous' hash to see if this response is a synchronous reply
+            my $method_frame_class = ref $method_frame;
+            if ($method_frame_class->method_spec->{synchronous}) {
+                #$self->{Logger}->debug("Checking wait_synchronous against $method_frame_class: " . Dumper($self->{wait_synchronous}));
+                my $matching_output_class;
+                while (my ($output_class, $details) = each %{ $self->{wait_synchronous} }) {
+                    next unless $details->{responses}{ $method_frame_class };
+                    $matching_output_class = $output_class;
+                    last;
                 }
-                foreach my $output (@{ $details->{process_after} }) {
-                    $self->{Logger}->debug("Dequeueing items that blocked due to '$frame_class'");
-                    $kernel->post($self->{Alias}, server_send => @$output);
+                if ($matching_output_class) {
+                    $self->{Logger}->debug("Response type '$method_frame_class' found from waiting request '$matching_output_class'");
+                    my $details = delete $self->{wait_synchronous}{$matching_output_class};
+                    if (my $callback = delete $details->{callback}) {
+                        $self->{Logger}->debug("Calling $matching_output_class callback");
+                        $callback->();
+                    }
+                    foreach my $output (@{ $details->{process_after} }) {
+                        $self->{Logger}->debug("Dequeueing items that blocked due to '$method_frame_class'");
+                        $kernel->post($self->{Alias}, server_send => @$output);
+                    }
+                }
+            }
+
+            if ($frame->channel == 0) {
+                if ($method_frame->isa('Net::AMQP::Protocol::Connection::Start')) {
+                    $kernel->post($self->{Alias}, server_send =>
+                        Net::AMQP::Frame::Method->new(
+                            channel => 0,
+                            method_frame => Net::AMQP::Protocol::Connection::StartOk->new(
+                                client_properties => {
+                                    platform    => 'Perl/POE',
+                                    product     => __PACKAGE__,
+                                    information => 'http://code.xmission.com/',
+                                    version     => $VERSION,
+                                },
+                                mechanism => 'AMQPLAIN', # TODO - ensure this is in $method_frame{mechanisms}
+                                response => { LOGIN => $self->{Username}, PASSWORD => $self->{Password} },
+                                locale => 'en_US',
+                            ),
+                        ),
+                    );
+                    next FRAMES;
+                }
+                elsif ($method_frame->isa('Net::AMQP::Protocol::Connection::Tune')) {
+                    $kernel->post($self->{Alias}, server_send =>
+                        Net::AMQP::Frame::Method->new(
+                            channel => 0,
+                            method_frame => Net::AMQP::Protocol::Connection::TuneOk->new(
+                                channel_max => 0,
+                                frame_max => 131072,
+                                heartbeat => 0,
+                            ),
+                        ),
+                        Net::AMQP::Frame::Method->new(
+                            channel => 0,
+                            method_frame => Net::AMQP::Protocol::Connection::Open->new(
+                                virtual_host => $self->{VirtualHost},
+                                capabilities => '',
+                                insist => 1,
+                            ),
+                        ),
+                    );
+                    next FRAMES;
+                }
+                elsif ($method_frame->isa('Net::AMQP::Protocol::Connection::OpenOk')) {
+                    $kernel->post($self->{Alias}, 'server_connected');
+                    next FRAMES;
                 }
             }
         }
-    }
 
-    if ($input_parsed->{channel} == 0) {
-        if (! $frame) {
-            $self->{Logger}->error("Server channel 0 got input that wasn't a frame");
+        if ($frame->channel != 0) {
+            my $channel = POE::Component::Client::AMQP::Channel->find_or_create( $frame->channel, $self );
+            $kernel->post($channel->{Alias}, server_input => $frame);
         }
-        elsif ($frame->isa('Net::AMQP::Protocol::Connection::Start')) {
-            $kernel->post($self->{Alias}, server_send =>
-                Net::AMQP::Protocol::Connection::StartOk->new(
-                    client_properties => {
-                        platform    => 'Perl/POE',
-                        product     => __PACKAGE__,
-                        information => 'http://code.xmission.com/',
-                        version     => $VERSION,
-                    },
-                    mechanism => 'AMQPLAIN', # TODO - ensure this is in $frame{mechanisms}
-                    response => { LOGIN => $self->{Username}, PASSWORD => $self->{Password} },
-                    locale => 'en_US',
-                )
-            );
+        else {
+            $self->{Logger}->error("Unhandled server input:\n".Dump($frame));
         }
-        elsif ($frame->isa('Net::AMQP::Protocol::Connection::Tune')) {
-            $kernel->post($self->{Alias}, server_send =>
-                Net::AMQP::Protocol::Connection::TuneOk->new(
-                    channel_max => 0,
-                    frame_max => 131072,
-                    heartbeat => 0,
-                ),
-                Net::AMQP::Protocol::Connection::Open->new(
-                    virtual_host => $self->{VirtualHost},
-                    capabilities => '',
-                    insist => 1,
-                ),
-            );
-        }
-        elsif ($frame->isa('Net::AMQP::Protocol::Connection::OpenOk')) {
-            $kernel->post($self->{Alias}, 'server_connected');
-        }
-    }
-    else {
-        my $channel = POE::Component::Client::AMQP::Channel->find_or_create( $input_parsed->{channel}, $self );
-        $kernel->post($channel->{Alias}, server_input => $input_parsed);
     }
 }
 

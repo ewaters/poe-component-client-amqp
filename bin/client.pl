@@ -20,11 +20,33 @@ my $logger;
     $logger->add_appender($appender);
 }
 
-Net::AMQP::Protocol->load_xml_spec($ARGV[0] || $FindBin::Bin . '/amqp0-8.xml');
+Net::AMQP::Protocol->load_xml_spec($ARGV[0]);
 
 my $amq = POE::Component::Client::AMQP->create(
     RemoteAddress => '127.0.0.1',
     Logger        => $logger,
+);
+
+POE::Session->create(
+    inline_states => {
+        _start => sub {
+            my ($kernel, $heap) = @_[KERNEL, HEAP];
+
+            $kernel->alias_set('blah');
+            $kernel->delay(publish => 1);
+        },
+
+        publish => sub {
+            my ($kernel, $heap) = @_[KERNEL, HEAP];
+            $amq->channel(1)->queue('one')->publish("Initial test to 'one'");
+            $kernel->delay(publish2 => 2);
+        },
+
+        publish2 => sub {
+            my ($kernel, $heap) = @_[KERNEL, HEAP];
+            $amq->channel(1)->queue('two')->publish("Initial test to 'two'");
+        },
+    },
 );
 
 $amq->on_startup(sub {
@@ -47,7 +69,6 @@ $amq->on_startup(sub {
             $logger->info("Queue 'two' received message '$msg'");
         });
 
-        $channel->queue('one')->publish("Initial test to 'one'");
 
     });
 });
