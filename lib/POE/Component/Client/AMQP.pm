@@ -155,7 +155,7 @@ sub create {
     );
 
     $self{Logger} ||= POE::Component::Client::AMQP::FakeLogger->new(
-        debug => $self{Debug} ? 1 : 0,
+        debug => keys(%{ $self{Debug} }) ? 1 : 0,
     );
 
     my $self = bless \%self, $class;
@@ -178,7 +178,6 @@ sub create {
         },
     );
     $self->{Debug} = \%Debug;
-
 
     POE::Session->create(
         object_states => [
