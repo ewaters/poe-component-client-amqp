@@ -316,7 +316,7 @@ sub server_input {
                 return;
             }
 
-            $content_meta->{$_} = $consumer_data->{$_} qw(queue opts);
+            $content_meta->{$_} = $consumer_data->{$_} foreach qw(queue opts);
 
             # Let the consumer know via the recorded callback
             $consumer_data->{callback}($content_meta->{payload}, $content_meta);
