@@ -43,13 +43,12 @@ use POE qw(
 use Params::Validate qw(validate_with);
 use Net::AMQP;
 use Net::AMQP::Common qw(:all);
-use Scalar::Util qw(blessed);
 use Carp;
 
 use base qw(Class::Accessor);
-__PACKAGE__->mk_accessors(qw(Logger));
+__PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping));
 
-our $VERSION = 0.1;
+our $VERSION = 0.01;
 
 =head1 USAGE
 
@@ -61,7 +60,7 @@ Create a new AMQP client.  Arguments to this method:
 
 =over 4
 
-=item I<RemoteAddress> (required)
+=item I<RemoteAddress> (default: 127.0.0.1)
 
 Connect to this host
 
@@ -121,6 +120,10 @@ The POE session alias of the TCP client
 
 Provide callbacks.  At the moment, 'Startup' is the only recognized callback.
 
+=item I<is_testing>
+
+Set to '1' to avoid creating POE::Sessions (mainly useful in t/ scripts)
+
 =back
 
 Returns a class object.
@@ -135,7 +138,7 @@ sub create {
     my %self = validate_with(
         params => \@_,
         spec => {
-            RemoteAddress => 1,
+            RemoteAddress => { default => '127.0.0.1' },
             RemotePort    => { default => 5672 },
             Username      => { default => 'guest' },
             Password      => { default => 'guest' },
@@ -150,6 +153,7 @@ sub create {
 
             channels      => { default => {} },
             is_started    => { default => 0 },
+            is_testing    => { default => 0 },
         },
         allow_extra => 1,
     );
@@ -185,18 +189,20 @@ sub create {
                 _start
                 server_send
                 server_connected
+                server_disconnect
             )],
         ],
-    );
+    ) unless $self->{is_testing};
 
     POE::Component::Client::TCP->new(
         Alias         => $self->{AliasTCP},
         RemoteAddress => $self->{RemoteAddress},
         RemotePort    => $self->{RemotePort},
         Connected     => sub { $self->tcp_connected(@_) },
+        Disconnected  => sub { $self->Logger->info("TCP connection is disconnected") },
         ServerInput   => sub { $self->tcp_server_input(@_) },
         Filter        => 'POE::Filter::Stream',
-    );
+    ) unless $self->{is_testing};
 
     return $self;
 }
@@ -267,6 +273,21 @@ sub run {
     $poe_kernel->run();
 }
 
+=head2 stop ()
+
+=over 4
+
+Shortcut to calling the POE state 'disconnect'
+
+=back
+
+=cut
+
+sub stop {
+    my $self = shift;
+    $poe_kernel->call($self->{Alias}, 'server_disconnect');
+}
+
 =head1 POE STATES
 
 The following are states you can post to to interact with the client.  Use the alias defined in the C<create()> call above.
@@ -277,6 +298,32 @@ sub _start {
     my ($self, $kernel) = @_[OBJECT, KERNEL];
 
     $kernel->alias_set($self->{Alias});
+}
+
+=head2 server_disconnect
+
+=over 4
+
+Send a Connection.Close request
+
+=back
+
+=cut
+
+sub server_disconnect {
+    my ($self, $kernel) = @_[OBJECT, KERNEL];
+
+    $self->{is_stopping} = 1;
+
+    $kernel->yield(server_send =>
+        Net::AMQP::Frame::Method->new(
+            synchronous_callback => sub {
+                $self->{is_stopped} = 1;
+                $self->{is_started} = 0;
+            },
+            method_frame => Net::AMQP::Protocol::Connection::Close->new(),
+        )
+    );
 }
 
 sub server_connected {
@@ -308,7 +355,7 @@ sub server_send {
     my ($self, $kernel, @output) = @_[OBJECT, KERNEL, ARG0 .. $#_];
 
     while (my $output = shift @output) {
-        if (! defined $output || ! ref $output || ! blessed $output) {
+        if (! defined $output || ! ref $output) {
             $self->{Logger}->error("Server send called with invalid output (".(defined $output ? $output : 'undef').")");
             next;
         }

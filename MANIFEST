@@ -1,0 +1,14 @@
+Build.PL
+examples/ack.pl
+examples/examples.pm
+examples/pingpong.pl
+examples/README
+lib/POE/Component/Client/AMQP.pm
+lib/POE/Component/Client/AMQP/Channel.pm
+lib/POE/Component/Client/AMQP/Queue.pm
+LICENSE
+Makefile.PL
+MANIFEST			This list of files
+META.yml
+README
+t/01_basic.t

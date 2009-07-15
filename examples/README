@@ -1,0 +1,18 @@
+These examples are perl versions of some examples found in the Ruby/EventMachine
+AMQP implementation (http://github.com/tmm1/amqp).  To run them, first start up
+an AMQP server, such as RabbitMQ:
+
+  hg clone http://hg.rabbitmq.com/rabbitmq-codegen
+  hg clone http://hg.rabbitmq.com/rabbitmq-server
+  cd rabbitmq-server
+  make run
+
+cd into this directory and type the example name:
+
+  ./pingpong.pl    # 1-1 communication with amq.direct
+  ./ack.pl         # using ack
+
+By default they require YAML::XS and Term::ANSIColor, and display colored debug
+output of the operations of the program.  To turn this off, prefix the program
+with DEBUG=0.  You can edit 'examples.pm' to customize what debug output you'd
+like to see.

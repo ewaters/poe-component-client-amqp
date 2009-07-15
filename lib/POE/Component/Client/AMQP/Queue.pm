@@ -18,6 +18,8 @@ use Params::Validate qw(validate_with);
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(name channel is_created));
 
+our $VERSION = 0.01;
+
 =head1 CLASS METHODS
 
 =head2 create (...)
@@ -104,7 +106,7 @@ sub created {
     }
 }
 
-=head2 subscribe ($subref, %opts)
+=head2 subscribe ($subref, \%opts)
 
 =over 4
 
@@ -114,9 +116,13 @@ Optionally provide %opts which will override defaults for the Basic.Consume call
 
 The argument signature of the callback is like so:
 
-  $subref->($message, $meta)
+  my $do_ack = $subref->($message, $meta)
 
 =over 4
+
+=item I<$do_ack>
+
+If in the %opts hash you choose 'no_ack => 0', then messages have to be explicitly ack'ed once handled.  If your callback returns true in this condition, an ack message will automatically be sent for you.
 
 =item I<$message>
 
@@ -165,7 +171,8 @@ The options used to create the Basic.Consume call (merge of default values and %
 =cut
 
 sub subscribe {
-    my ($self, $callback, %user_opts) = @_;
+    my ($self, $callback, $user_opts) = @_;
+    $user_opts ||= {};
 
     my %opts = (
         ticket       => 0,
@@ -175,7 +182,7 @@ sub subscribe {
         no_ack       => 1,
         #exclusive    => 0,
         #nowait       => 0, # do not send the ConsumeOk response
-        %user_opts,
+        %$user_opts,
     );
 
     # TODO: if user sets $opts{nowait}, we can't do the synchronous_callback or even know the consumer_tag.
@@ -202,7 +209,7 @@ sub subscribe {
     });
 }
 
-=head2 publish ($message, %opts)
+=head2 publish ($message, \%opts)
 
 =over 4
 
@@ -215,7 +222,8 @@ Optionally pass %opts, which can override any option in the L<Net::AMQP::Protoco
 =cut
 
 sub publish {
-    my ($self, $message, %user_opts) = @_;
+    my ($self, $message, $user_opts) = @_;
+    $user_opts ||= {};
 
     my %method_opts = (
         ticket      => 0,
@@ -223,7 +231,7 @@ sub publish {
         routing_key => $self->{name}, # route to my queue
         mandatory   => 1,
         #immediate   => 0,
-        %user_opts,
+        %$user_opts,
     );
 
     my %content_opts = (
@@ -241,14 +249,14 @@ sub publish {
         #user_id          => '',
         #app_id           => '',
         #cluster_id       => '',
-        %user_opts,
+        %$user_opts,
     );
 
     $self->do_when_created(sub {
         $poe_kernel->post($self->{channel}{Alias}, server_send => 
             Net::AMQP::Protocol::Basic::Publish->new(%method_opts),
             Net::AMQP::Frame::Header->new(
-                weight       => $user_opts{weight} || 0,
+                weight       => $user_opts->{weight} || 0,
                 body_size    => length($message),
                 header_frame => Net::AMQP::Protocol::Basic::ContentHeader->new(%content_opts),
             ),

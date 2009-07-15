@@ -1,0 +1,34 @@
+---
+name: POE-Component-Client-AMQP
+version: 0.01
+author:
+  - 'Eric Waters <ewaters@gmail.com>'
+abstract: Asynchronous AMQP client implementation in POE
+license: perl
+resources:
+  license: http://dev.perl.org/licenses/
+requires:
+  Class::Accessor: 0
+  Net::AMQP: 0
+  POE: 0
+  POE::Component::Client::TCP: 0
+  Params::Validate: 0
+build_requires:
+  Test::Deep: 0
+  Test::More: 0
+provides:
+  POE::Component::Client::AMQP:
+    file: lib/POE/Component/Client/AMQP.pm
+    version: 0.01
+  POE::Component::Client::AMQP::Channel:
+    file: lib/POE/Component/Client/AMQP/Channel.pm
+    version: 0.01
+  POE::Component::Client::AMQP::FakeLogger:
+    file: lib/POE/Component/Client/AMQP.pm
+  POE::Component::Client::AMQP::Queue:
+    file: lib/POE/Component/Client/AMQP/Queue.pm
+    version: 0.01
+generated_by: Module::Build version 0.33
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4

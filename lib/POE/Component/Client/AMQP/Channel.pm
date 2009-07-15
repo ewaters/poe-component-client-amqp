@@ -14,10 +14,11 @@ use strict;
 use warnings;
 use POE;
 use Params::Validate;
-use Data::Dumper;
 use Carp;
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(id server Alias));
+
+our $VERSION = 0.01;
 
 =head1 CLASS METHODS 
 
@@ -163,7 +164,7 @@ sub do_when_created {
 
 ### Deferred methods ###
 
-=head2 queue ($name, %opts)
+=head2 queue ($name, \%opts)
 
 =over 4
 
@@ -176,7 +177,8 @@ If you pass %opts, the values you pass will override defaults in the L<Net::AMQP
 =cut
 
 sub queue {
-    my ($self, $name, %user_opts) = @_;
+    my ($self, $name, $user_opts) = @_;
+    $user_opts ||= {};
 
     if (defined $name && $self->{queues}{$name}) {
         return $self->{queues}{$name};
@@ -193,7 +195,7 @@ sub queue {
         auto_delete => 1, # queue is deleted after the last consumer
         #nowait      => 0, # do not send a DeclareOk response
         #arguments   => {},
-        %user_opts,
+        %$user_opts,
     );
 
     # TODO: if user sets $opts{nowait}, we can't do the synchronous_callback below
@@ -319,7 +321,17 @@ sub server_input {
             $content_meta->{$_} = $consumer_data->{$_} foreach qw(queue opts);
 
             # Let the consumer know via the recorded callback
-            $consumer_data->{callback}($content_meta->{payload}, $content_meta);
+            my $callback_return = $consumer_data->{callback}($content_meta->{payload}, $content_meta);
+
+            # The return value is normally ignored unless the Consume call had 'no_ack => 0',
+            # in which case a 'true' response from the callback will automatically ack
+            if ($callback_return && ! $consumer_data->{opts}{no_ack}) {
+                $kernel->call($self->{Alias}, server_send =>
+                    Net::AMQP::Protocol::Basic::Ack->new(
+                        delivery_tag => $content_meta->{method_frame}->delivery_tag
+                    )
+                );
+            }
         }
     }
 }

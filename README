@@ -1,1 +1,140 @@
-Placeholder
+NAME
+    POE::Component::Client::AMQP - Asynchronous AMQP client implementation
+    in POE
+
+SYNOPSIS
+      use POE::Component::Client::AMQP;
+
+      Net::AMQP::Protocol->load_xml_spec('amqp0-8.xml');
+
+      my $amq = Component::Client::AMQP->create(
+          RemoteAddress => 'mq.domain.tld',
+      );
+
+      $amq->channel(1)->queue('frank')->subscribe(sub {
+          my ($payload, $meta) = @_;
+
+          my $reply_to = $meta->{header_frame}->reply_to;
+
+          $amq->channel(1)->queue($reply_to)->publish("Message received");
+      });
+
+      $amq->run();
+
+DESCRIPTION
+    This module implements the Advanced Message Queue Protocol (AMQP) TCP/IP
+    client. It's goal is to provide users with a quick and easy way of using
+    AMQP while at the same time exposing the advanced functionality of the
+    protocol if needed.
+
+    The (de)serialization and representation logic is handled by Net::AMQP,
+    which needs to be setup (via load_xml_spec()) prior to this client
+    software running. Please see the docs there for further information on
+    this.
+
+USAGE
+  create (...)
+        Create a new AMQP client. Arguments to this method:
+
+        *RemoteAddress* (default: 127.0.0.1)
+            Connect to this host
+
+        *RemotePort* (default: 5672)
+        *Username* (default: guest)
+        *Password* (default: guest)
+        *VirtualHost* (default: /)
+        *Logger* (default: simple screen logger)
+            Provide an object which implements 'debug', 'info' and 'error'
+            logging methods (such as Log::Log4perl).
+
+        *Debug*
+            This module provides extensive debugging options. These are
+            specified as a hash as follows:
+
+            *logic* (boolean)
+                Display decisions the code is making
+
+            *frame_input* (boolean)
+            *frame_output* (boolean)
+                Use the *frame_dumper* code to display frames that come in
+                from or out to the server.
+
+            *frame_dumper* (coderef)
+                A coderef which, given a Net::AMQP::Frame object, will
+                return a string representation of it, prefixed with "\n".
+
+            *raw_input* (boolean)
+            *raw_output* (boolean)
+                Use the *raw_dumper* code to display raw data that comes in
+                from or out to the server.
+
+            *raw_dumper* (coderef)
+                A coderef which, given a raw string, will return a byte
+                representation of it, prefixed with "\n".
+
+        *Alias* (default: amqp_client)
+            The POE session alias of the main client session
+
+        *AliasTCP* (default: tcp_client)
+            The POE session alias of the TCP client
+
+        *Callbacks* (default: {})
+            Provide callbacks. At the moment, 'Startup' is the only
+            recognized callback.
+
+        *is_testing*
+            Set to '1' to avoid creating POE::Sessions (mainly useful in t/
+            scripts)
+
+        Returns a class object.
+
+CLASS METHODS
+  do_when_startup (...)
+        Pass a subref that should be executed after the client has connected
+        and authenticated with the remote AMQP server. If the client is
+        already connected and authenticated, the subref will be called
+        immediately. Think: deferred.
+
+  channel ($id)
+        Call with an optional argument $id (1 - 65536). Returns a
+        POE::Component::Client::AMQP::Channel object which can be used
+        immediately.
+
+  run ()
+        Shortcut to calling $poe_kernel->run
+
+  stop ()
+        Shortcut to calling the POE state 'disconnect'
+
+POE STATES
+    The following are states you can post to to interact with the client.
+    Use the alias defined in the "create()" call above.
+
+  server_disconnect
+        Send a Connection.Close request
+
+  server_send (@output)
+        Pass one or more Net::AMQP::Frame objects. For short hand, you may
+        pass Net::AMQP::Protocol::Base objects, which will be automatically
+        wrapped in the appropriate frame type, with channel 0. These frames
+        will be written to the server. In the case of
+        Net::AMQP::Frame::Method objects which are calling a synchronous
+        method, the client will handle them one at a time, waiting until a
+        synchronous method returns properly before sending further
+        synchronous frames. This happens automatically.
+
+SEE ALSO
+    POE, Net::AMQP
+
+COPYRIGHT
+    Copyright (c) 2009 Eric Waters and XMission LLC
+    (http://www.xmission.com/). All rights reserved. This program is free
+    software; you can redistribute it and/or modify it under the same terms
+    as Perl itself.
+
+    The full text of the license can be found in the LICENSE file included
+    with this module.
+
+AUTHOR
+    Eric Waters <ewaters@gmail.com>
+
