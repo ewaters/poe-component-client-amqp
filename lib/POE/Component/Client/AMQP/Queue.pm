@@ -260,8 +260,10 @@ sub publish {
                 body_size    => length($message),
                 header_frame => Net::AMQP::Protocol::Basic::ContentHeader->new(%content_opts),
             ),
+            (length($message) > 0 ? (
             # TODO: split the message into parts if it exceeds the limits set by the Connection.Tune method
             Net::AMQP::Frame::Body->new(payload => $message),
+            ) : () ),
         );
     });
 }

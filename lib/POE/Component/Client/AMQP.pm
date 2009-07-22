@@ -315,6 +315,9 @@ sub server_disconnect {
 
     $self->{is_stopping} = 1;
 
+    # Don't defer my disconnect request just because we're waiting for the response to a synchronous method
+    $self->{wait_synchronous} = {};
+
     $kernel->yield(server_send =>
         Net::AMQP::Frame::Method->new(
             synchronous_callback => sub {
@@ -510,7 +513,7 @@ sub tcp_server_input {
                     $kernel->post($self->{Alias}, server_send =>
                         Net::AMQP::Protocol::Connection::TuneOk->new(
                             channel_max => 0,
-                            frame_max => 131072,
+                            frame_max => 131072, # TODO - actually act on this number and the Tune value
                             heartbeat => 0,
                         ),
                         Net::AMQP::Frame::Method->new(

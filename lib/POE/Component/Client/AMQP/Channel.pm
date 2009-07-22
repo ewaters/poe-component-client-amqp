@@ -215,7 +215,7 @@ sub queue {
                 synchronous_callback => sub {
                     if (! defined $name) {
                         # I didn't know the name of the queue at the time of Queue.Declare
-                        my $response_frame = shift;
+                        my $response_frame = $_[0]->method_frame;
                         $self->{queues}{ $response_frame->queue } = $queue;
                         $queue->name( $response_frame->queue );
                     }
@@ -283,6 +283,14 @@ sub server_input {
             $self->server->{Logger}->error("Channel ".$self->id." got method call $method_frame when content (header or body) was expected");
             return;
         }
+        elsif ($method_frame->isa('Net::AMQP::Protocol::Channel::Close')) {
+            $self->server->{Logger}->error(
+                "Channel ".$self->id." has been closed by the server: " .
+                $method_frame->reply_code . ': ' . $method_frame->reply_text
+            );
+            $self->server->stop();
+        }
+
     }
     elsif ($frame->isa('Net::AMQP::Frame::Header')) {
         my $header_frame = $frame->header_frame;
