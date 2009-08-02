@@ -245,6 +245,8 @@ sub publish {
 
 =over 4
 
+Shortcut to send a Queue.Bind call with this queue name.  Pass the same args you'd pass to a L<Net::AMQP::Protocol::Queue::Bind> object creation.
+
 =back
 
 =cut

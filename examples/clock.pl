@@ -13,7 +13,8 @@ $channel
         $amq->Logger->info("every second received " . localtime($timestamp));
     });
 
-$channel->queue('every 5 seconds')
+$channel
+    ->queue('every 5 seconds')
     ->bind(exchange => 'amq.fanout')
     ->subscribe(sub {
         my $timestamp = shift;
