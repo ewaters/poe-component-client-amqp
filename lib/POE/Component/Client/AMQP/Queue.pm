@@ -231,6 +231,7 @@ sub publish {
         my %opts = (
             routing_key  => $self->{name}, # route to self
             content_type => 'application/octet-stream',
+            %$user_opts,
         );
 
         $poe_kernel->post($self->{channel}{Alias}, server_send => 
