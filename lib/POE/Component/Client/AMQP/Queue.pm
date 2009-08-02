@@ -174,20 +174,20 @@ sub subscribe {
     my ($self, $callback, $user_opts) = @_;
     $user_opts ||= {};
 
-    my %opts = (
-        ticket       => 0,
-        queue        => $self->{name},
-        #consumer_tag => '', # auto-generated
-        #no_local     => 0,
-        no_ack       => 1,
-        #exclusive    => 0,
-        #nowait       => 0, # do not send the ConsumeOk response
-        %$user_opts,
-    );
-
-    # TODO: if user sets $opts{nowait}, we can't do the synchronous_callback or even know the consumer_tag.
-
     $self->do_when_created(sub {
+        my %opts = (
+            ticket       => 0,
+            queue        => $self->{name},
+            #consumer_tag => '', # auto-generated
+            #no_local     => 0,
+            no_ack       => 1,
+            #exclusive    => 0,
+            #nowait       => 0, # do not send the ConsumeOk response
+            %$user_opts,
+        );
+
+        # TODO: if user sets $opts{nowait}, we can't do the synchronous_callback or even know the consumer_tag.
+
         $poe_kernel->post($self->{channel}{Alias}, server_send => 
             Net::AMQP::Frame::Method->new(
                 synchronous_callback => sub {
@@ -207,6 +207,8 @@ sub subscribe {
             ),
         );
     });
+
+    return $self;
 }
 
 =head2 publish ($message, \%opts)
@@ -225,47 +227,39 @@ sub publish {
     my ($self, $message, $user_opts) = @_;
     $user_opts ||= {};
 
-    my %method_opts = (
-        ticket      => 0,
-        #exchange    => '', # default exchange
-        routing_key => $self->{name}, # route to my queue
-        mandatory   => 1,
-        #immediate   => 0,
-        %$user_opts,
-    );
-
-    my %content_opts = (
-        content_type     => 'application/octet-stream',
-        #content_encoding => '',
-        #headers          => {},
-        delivery_mode    => 1, # non-persistent
-        priority         => 1,
-        #correlation_id   => '',
-        #reply_to         => '',
-        #expiration       => '',
-        #message_id       => '',
-        #timestamp        => time,
-        #type             => '',
-        #user_id          => '',
-        #app_id           => '',
-        #cluster_id       => '',
-        %$user_opts,
-    );
-
     $self->do_when_created(sub {
+        my %opts = (
+            routing_key  => $self->{name}, # route to self
+            content_type => 'application/octet-stream',
+        );
+
         $poe_kernel->post($self->{channel}{Alias}, server_send => 
-            Net::AMQP::Protocol::Basic::Publish->new(%method_opts),
-            Net::AMQP::Frame::Header->new(
-                weight       => $user_opts->{weight} || 0,
-                body_size    => length($message),
-                header_frame => Net::AMQP::Protocol::Basic::ContentHeader->new(%content_opts),
-            ),
-            (length($message) > 0 ? (
-            # TODO: split the message into parts if it exceeds the limits set by the Connection.Tune method
-            Net::AMQP::Frame::Body->new(payload => $message),
-            ) : () ),
+            $self->{channel}{server}->compose_basic_publish($message, %opts)
         );
     });
+
+    return $self;
+}
+
+=head2 bind (%opts)
+
+=over 4
+
+=back
+
+=cut
+
+sub bind {
+    my ($self, %opts) = @_;
+
+    $self->do_when_created(sub {
+        $opts{queue} ||= $self->{name};
+        $poe_kernel->post($self->{channel}{Alias}, server_send =>
+            Net::AMQP::Protocol::Queue::Bind->new(%opts)
+        );
+    });
+
+    return $self;
 }
 
 =head1 SEE ALSO

@@ -17,7 +17,7 @@ use YAML::XS;
 use Net::AMQP::Common qw(show_ascii);
 use Term::ANSIColor qw(:constants);
 
-my $debug = $ENV{DEBUG} || 1;
+my $debug = defined $ENV{DEBUG} ? $ENV{DEBUG} : 1;
 
 Net::AMQP::Protocol->load_xml_spec($ARGV[0] || $FindBin::Bin . '/../../net-amqp/spec/amqp0-8.xml');
 

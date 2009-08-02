@@ -40,7 +40,7 @@ use POE qw(
     Component::Client::AMQP::Channel
     Component::Client::AMQP::Queue
 );
-use Params::Validate qw(validate_with);
+use Params::Validate qw(validate validate_with);
 use Net::AMQP;
 use Net::AMQP::Common qw(:all);
 use Carp;
@@ -286,6 +286,125 @@ Shortcut to calling the POE state 'disconnect'
 sub stop {
     my $self = shift;
     $poe_kernel->call($self->{Alias}, 'server_disconnect');
+}
+
+=head2 compose_basic_publish ($payload, %options)
+
+=over 4
+
+A helper method to generate the frames necessary for a basic publish.  Returns a L<Net::AMQP::Protocol::Basic::Publish>, L<Net::AMQP::Frame::Header> (wrapping a L<Net::AMQP::Protocol::Basic::ContentHeader> frame) followed by zero or more L<Net::AMQP::Frame::Body> frames.  Since the arguments for each one of these frames are unique, the %options hash provides options for all of the frames.
+
+The following options are supported, all of which are optional, some having sane defaults:
+
+=over 4
+
+=item I<Header options>
+
+=over 4
+
+=item I<weight> (default: 0)
+
+=back
+
+=item I<Method options>
+
+=over 4
+
+=item I<ticket> (default: 0)
+
+=item I<exchange>
+
+=item I<routing_key>
+
+=item I<mandatory> (default: 1)
+
+=item I<immediate>
+
+=back
+
+=item I<Content options)
+
+=over 4
+
+=item I<content_type>
+
+=item I<content_encoding>
+
+=item I<headers> (default: {})
+
+=item I<delivery_mode> (default: 1)
+
+=item I<priority> (default: 1)
+
+=item I<correlation_id>
+
+=item I<reply_to>
+
+=item I<expiration>
+
+=item I<message_id>
+
+=item I<timestamp>
+
+=item I<type>
+
+=item I<user_id>
+
+=item I<app_id>
+
+=item I<cluster_id>
+
+=back
+
+=back
+
+=back
+
+=cut
+
+sub compose_basic_publish {
+    my ($self, $payload) = (shift, shift);
+
+    my %opts = validate(@_, {
+        # Header options
+        weight => { default => 0 },
+
+        # Method options
+        ticket      => { default => 0 },
+        exchange    => 0,
+        routing_key => 0,
+        mandatory   => { default => 1 },
+        immediate   => 0,
+
+        # Content options
+        content_type     => 0,
+        content_encoding => 0,
+        headers          => { default => {} },
+        delivery_mode    => { default => 1 }, # non-persistent
+        priority         => { default => 1 },
+        correlation_id   => 0,
+        reply_to         => 0,
+        expiration       => 0,
+        message_id       => 0,
+        timestamp        => 0,
+        type             => 0,
+        user_id          => 0,
+        app_id           => 0,
+        cluster_id       => 0,
+    });
+
+    return (
+        Net::AMQP::Protocol::Basic::Publish->new(%opts),
+        Net::AMQP::Frame::Header->new(
+            weight       => $opts{weight},
+            body_size    => length($payload),
+            header_frame => Net::AMQP::Protocol::Basic::ContentHeader->new(%opts),
+        ),
+        (length($payload) > 0 ? (
+        # TODO: split the message into parts if it exceeds the limits set by the Connection.Tune method
+        Net::AMQP::Frame::Body->new(payload => $payload),
+        ) : () ),
+    );
 }
 
 =head1 POE STATES
