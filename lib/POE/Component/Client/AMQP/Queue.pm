@@ -140,7 +140,7 @@ L<Net::AMQP::Protocol::Base> delivering method object.
 
 =item I<header_frame>
 
-L<Net::AMQP::Frame::Header> object
+L<Net::AMQP::Protocol::Base> delivering ContentHeader object.
 
 =item I<weight>, I<body_size>
 

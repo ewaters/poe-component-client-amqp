@@ -34,21 +34,36 @@ The (de)serialization and representation logic is handled by L<Net::AMQP>, which
 
 use strict;
 use warnings;
+use Params::Validate qw(validate validate_with);
+use Net::AMQP;
+use Net::AMQP::Common qw(:all);
+use Carp;
+use base qw(Exporter Class::Accessor);
+__PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping));
+
+our $VERSION = 0.01;
+
+use constant {
+    AMQP_ACK    => '__amqp_ack__',
+    AMQP_REJECT => '__amqp_reject__',
+};
+
+my @_constants;
+our (@EXPORT_OK, %EXPORT_TAGS);
+BEGIN {
+    @_constants = qw(AMQP_ACK AMQP_REJECT);
+    @EXPORT_OK = (@_constants);
+    %EXPORT_TAGS = ('constants' => [@_constants]);
+};
+
+# Use libraries that require my constants after defining them
+
 use POE qw(
     Filter::Stream
     Component::Client::TCP
     Component::Client::AMQP::Channel
     Component::Client::AMQP::Queue
 );
-use Params::Validate qw(validate validate_with);
-use Net::AMQP;
-use Net::AMQP::Common qw(:all);
-use Carp;
-
-use base qw(Class::Accessor);
-__PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping));
-
-our $VERSION = 0.01;
 
 =head1 USAGE
 
@@ -154,6 +169,7 @@ sub create {
             channels      => { default => {} },
             is_started    => { default => 0 },
             is_testing    => { default => 0 },
+            is_stopped    => { default => 0 },
         },
         allow_extra => 1,
     );
@@ -190,6 +206,7 @@ sub create {
                 server_send
                 server_connected
                 server_disconnect
+                shutdown
             )],
         ],
     ) unless $self->{is_testing};
@@ -201,6 +218,7 @@ sub create {
         Connected     => sub { $self->tcp_connected(@_) },
         Disconnected  => sub { $self->Logger->info("TCP connection is disconnected") },
         ServerInput   => sub { $self->tcp_server_input(@_) },
+        ServerError   => sub { $self->tcp_server_error(@_) },
         Filter        => 'POE::Filter::Stream',
     ) unless $self->{is_testing};
 
@@ -476,6 +494,8 @@ Pass one or more L<Net::AMQP::Frame> objects.  For short hand, you may pass L<Ne
 sub server_send {
     my ($self, $kernel, @output) = @_[OBJECT, KERNEL, ARG0 .. $#_];
 
+    return if $self->{is_stopped};
+
     while (my $output = shift @output) {
         if (! defined $output || ! ref $output) {
             $self->{Logger}->error("Server send called with invalid output (".(defined $output ? $output : 'undef').")");
@@ -541,6 +561,24 @@ sub server_send {
 
         $self->{HeapTCP}{server}->put($output);
     }
+}
+
+=head2 shutdown ()
+
+=over 4
+
+If you need to stop things immediately, call shutdown().  This is not graceful.
+
+=back
+
+=cut
+
+sub shutdown {
+    my ($self, $kernel) = @_[OBJECT, KERNEL];
+
+    $self->{is_stopped} = 1;
+
+    $kernel->call($self->{AliasTCP}, 'shutdown');
 }
 
 ## Private Class Methods ###
@@ -663,6 +701,18 @@ sub tcp_server_input {
             $self->{Logger}->error("Unhandled input frame ".ref($frame));
         }
     }
+}
+
+sub tcp_server_error {
+    my $self = shift;
+    my ($kernel, $heap, $name, $num, $string) = @_[KERNEL, HEAP, ARG0, ARG1, ARG2];
+
+    # Normal disconnection
+    if ($name eq 'read' && $num == 0 && $self->{is_stopping}) {
+        return;
+    }
+
+    $self->{Logger}->error("TCP error: $name (num: $num, string: $string)");
 }
 
 {

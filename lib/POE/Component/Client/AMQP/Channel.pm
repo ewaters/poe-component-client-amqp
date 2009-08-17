@@ -15,6 +15,7 @@ use warnings;
 use POE;
 use Params::Validate;
 use Carp;
+use POE::Component::Client::AMQP qw(:constants);
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(id server Alias));
 
@@ -162,6 +163,24 @@ sub do_when_created {
     }
 }
 
+=head2 send_frames (...)
+
+=over 4
+
+Same as the POE state L<server_send>, but can be called on the object and before the channel is created.
+
+=back
+
+=cut
+
+sub send_frames {
+    my ($self, @frames) = @_;
+
+    $self->do_when_created(sub {
+        $poe_kernel->post($self->{Alias}, server_send => @frames);
+    });
+}
+
 ### Deferred methods ###
 
 =head2 queue ($name, \%opts)
@@ -274,7 +293,8 @@ sub server_input {
         my $method_frame = $frame->method_frame;
 
         # TODO: There are probably other methods that have content following them
-        if ($method_frame->isa('Net::AMQP::Protocol::Basic::Deliver')) {
+        if ($method_frame->isa('Net::AMQP::Protocol::Basic::Deliver')
+            || $method_frame->isa('Net::AMQP::Protocol::Basic::Return')) {
             # Start collecting content
             $self->{collecting_content} = { method_frame => $method_frame };
             return;
@@ -318,6 +338,12 @@ sub server_input {
             # Done collecting content
             delete $self->{collecting_content};
 
+            if ($content_meta->{method_frame}->isa('Net::AMQP::Protocol::Basic::Return')) {
+                # FIXME
+                $self->server->{Logger}->error("Channel ".$self->id." received a returned payload (".$content_meta->{method_frame}->reply_code . ': ' . $content_meta->{method_frame}->reply_text ."); no way yet to handle this");
+                return;
+            }
+
             my $consumer_tag = $content_meta->{method_frame}->consumer_tag;
             my $consumer_data = $self->{consumers}{$consumer_tag};
             if (! $consumer_data) {
@@ -333,12 +359,20 @@ sub server_input {
 
             # The return value is normally ignored unless the Consume call had 'no_ack => 0',
             # in which case a 'true' response from the callback will automatically ack
-            if ($callback_return && ! $consumer_data->{opts}{no_ack}) {
-                $kernel->call($self->{Alias}, server_send =>
-                    Net::AMQP::Protocol::Basic::Ack->new(
+            if (defined $callback_return && ! $consumer_data->{opts}{no_ack}) {
+                my @message;
+                if ($callback_return eq AMQP_ACK) {
+                    push @message, Net::AMQP::Protocol::Basic::Ack->new(
                         delivery_tag => $content_meta->{method_frame}->delivery_tag
-                    )
-                );
+                    );
+                }
+                elsif ($callback_return eq AMQP_REJECT) {
+                    push @message, Net::AMQP::Protocol::Basic::Reject->new(
+                        delivery_tag => $content_meta->{method_frame}->delivery_tag,
+                        requeue => 1,
+                    );
+                }
+                $kernel->call($self->{Alias}, server_send => @message) if @message;
             }
         }
     }
