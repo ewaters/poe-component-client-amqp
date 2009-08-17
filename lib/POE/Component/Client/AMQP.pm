@@ -60,7 +60,7 @@ BEGIN {
 
 use POE qw(
     Filter::Stream
-    Component::Client::TCP
+    Component::Client::AMQP::TCP
     Component::Client::AMQP::Channel
     Component::Client::AMQP::Queue
 );
@@ -154,7 +154,7 @@ sub create {
         params => \@_,
         spec => {
             RemoteAddress => { default => '127.0.0.1' },
-            RemotePort    => { default => 5672 },
+            RemotePort    => 0,
             Username      => { default => 'guest' },
             Password      => { default => 'guest' },
             VirtualHost   => { default => '/' },
@@ -165,6 +165,7 @@ sub create {
             Alias         => { default => 'amqp_client' },
             AliasTCP      => { default => 'tcp_client' },
             Callbacks     => { default => {} },
+            SSL           => { default => 0 },
 
             channels      => { default => {} },
             is_started    => { default => 0 },
@@ -173,6 +174,8 @@ sub create {
         },
         allow_extra => 1,
     );
+
+    $self{RemotePort} ||= $self{SSL} ? 5671 : 5672;
 
     $self{Logger} ||= POE::Component::Client::AMQP::FakeLogger->new(
         debug => keys(%{ $self{Debug} }) ? 1 : 0,
@@ -211,7 +214,7 @@ sub create {
         ],
     ) unless $self->{is_testing};
 
-    POE::Component::Client::TCP->new(
+    POE::Component::Client::AMQP::TCP->new(
         Alias         => $self->{AliasTCP},
         RemoteAddress => $self->{RemoteAddress},
         RemotePort    => $self->{RemotePort},
@@ -220,6 +223,7 @@ sub create {
         ServerInput   => sub { $self->tcp_server_input(@_) },
         ServerError   => sub { $self->tcp_server_error(@_) },
         Filter        => 'POE::Filter::Stream',
+        SSL           => $self->{SSL},
     ) unless $self->{is_testing};
 
     return $self;
@@ -469,7 +473,7 @@ sub server_disconnect {
 sub server_connected {
     my ($self, $kernel) = @_[OBJECT, KERNEL];
 
-    $self->{Logger}->info("Connected to the AMQP server and ready to act");
+    $self->{Logger}->info("Connected to the AMQP server ".($self->{SSL} ? '(over SSL) ' : '')."and ready to act");
 
     # Call the callbacks if present
     if ($self->{Callbacks}{Startup}) {
