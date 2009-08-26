@@ -248,6 +248,52 @@ sub queue {
     return $queue;
 }
 
+=head2 exchange( $name, \%opts )
+
+Creates a new exchange called $name.  Returns 1.
+
+=cut
+
+sub exchange {
+    my ($self, $name, $user_opts) = @_;
+    $user_opts ||= {};
+
+    if (defined $name && $self->{exchanges}{$name}) {
+        return $self->{exchanges}{$name};
+    }
+
+    my %opts = (
+        ticket      => 0,
+        exchange      => (defined $name ? $name : ''),
+        #passive     => 0, # if set, server will not create the queue; checks for existance
+        #durable     => 0, # will remain active after restart
+        auto_delete => 1, # queue is deleted after the last consumer
+        #nowait      => 0, # do not send a DeclareOk response
+        #arguments   => {},
+        %$user_opts,
+    );
+
+
+    # Remember it here if we have a name; otherwise wait for the callback
+    $self->{exchanges}{$name} = 1 if defined $name;
+
+    $self->do_when_created(sub {
+        $poe_kernel->post($self->{Alias}, server_send => 
+            Net::AMQP::Frame::Method->new(
+                synchronous_callback => sub {
+                    if (! defined $name) {
+                        my $response_frame = $_[0]->method_frame;
+                        $self->{exchanges}{ $response_frame->exchange } = 1;
+                    }
+                },
+                method_frame => Net::AMQP::Protocol::Exchange::Declare->new(%opts),
+            ),
+        );
+    });
+
+    return 1;
+}
+
 =head1 POE STATES
 
 The following are states you can post to to interact with the client.  Use the alias defined in the C<create()> call above.

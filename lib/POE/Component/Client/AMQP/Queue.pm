@@ -242,7 +242,7 @@ sub publish {
     return $self;
 }
 
-=head2 bind (%opts)
+=head2 bind ($exchange, \%opts)
 
 =over 4
 
@@ -253,13 +253,14 @@ Shortcut to send a Queue.Bind call with this queue name.  Pass the same args you
 =cut
 
 sub bind {
-    my ($self, %opts) = @_;
+    my ($self, $exchange, $opts) = @_;
 
     $self->do_when_created(sub {
-        $opts{queue} ||= $self->{name};
-        $poe_kernel->post($self->{channel}{Alias}, server_send =>
-            Net::AMQP::Protocol::Queue::Bind->new(%opts)
-        );
+        $opts->{queue} ||= $self->{name};
+	$opts->{exchange} ||= $exchange;
+	my $frame = Net::AMQP::Protocol::Queue::Bind->new(%$opts);
+        $poe_kernel->post($self->{channel}{Alias}, server_send => $frame );
+
     });
 
     return $self;
