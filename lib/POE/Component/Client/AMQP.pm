@@ -10,7 +10,7 @@ POE::Component::Client::AMQP - Asynchronous AMQP client implementation in POE
 
   Net::AMQP::Protocol->load_xml_spec('amqp0-8.xml');
 
-  my $amq = Component::Client::AMQP->create(
+  my $amq = POE::Component::Client::AMQP->create(
       RemoteAddress => 'mq.domain.tld',
   );
 
@@ -67,9 +67,11 @@ use POE qw(
 
 =head1 USAGE
 
-=head2 create (...)
+=head2 create
 
-=over 4
+  my $amq = POE::Component::Client::AMQP->create(
+      RemoteAddress => 'mq.domain.tld',
+  );
 
 Create a new AMQP client.  Arguments to this method:
 
@@ -123,6 +125,10 @@ A coderef which, given a raw string, will return a byte representation of it, pr
 
 =back
 
+=item I<Keepalive> (default: 0)
+
+If set, will send a L<Net::AMQP::Frame::Heartbeat> frame every Keepalive seconds after the last activity on the connection.  This is a mechanism to keep a long-open TCP session alive.
+
 =item I<Alias> (default: amqp_client)
 
 The POE session alias of the main client session
@@ -142,8 +148,6 @@ Set to '1' to avoid creating POE::Sessions (mainly useful in t/ scripts)
 =back
 
 Returns a class object.
-
-=back
 
 =cut
 
@@ -166,6 +170,7 @@ sub create {
             AliasTCP      => { default => 'tcp_client' },
             Callbacks     => { default => {} },
             SSL           => { default => 0 },
+            Keepalive     => { default => 0 },
 
             channels      => { default => {} },
             is_started    => { default => 0 },
@@ -210,6 +215,7 @@ sub create {
                 server_connected
                 server_disconnect
                 shutdown
+                keepalive
             )],
         ],
     ) unless $self->{is_testing};
@@ -483,6 +489,10 @@ sub server_connected {
     }
 
     $self->{is_started} = 1;
+
+    if ($self->{Keepalive}) {
+        $kernel->delay(keepalive => $self->{Keepalive});
+    }
 }
 
 =head2 server_send (@output)
@@ -564,6 +574,7 @@ sub server_send {
         $output = $raw_output;
 
         $self->{HeapTCP}{server}->put($output);
+        $self->{last_server_put} = time;
     }
 }
 
@@ -582,7 +593,35 @@ sub shutdown {
 
     $self->{is_stopped} = 1;
 
+    # Clear any alarms that may be set ('keepalive', for instance)
+    $poe_kernel->alarm_remove_all();
+
     $kernel->call($self->{AliasTCP}, 'shutdown');
+}
+
+=head2 keepalive
+
+Sends a Heartbeat frame at a regular interval to keep the TCP session from timing out.
+
+=cut
+
+sub keepalive {
+    my ($self, $kernel) = @_[OBJECT, KERNEL];
+
+    return unless $self->{Keepalive} > 0;
+
+    my $idle_time = time - $self->{last_server_put};
+    my $delay = $self->{Keepalive};
+    if ($idle_time >= $self->{Keepalive}) {
+        $kernel->yield(server_send => 
+            Net::AMQP::Frame::Heartbeat->new()
+        );
+    }
+    else {
+        $delay -= $idle_time;
+    }
+
+    $kernel->delay(keepalive => $delay);
 }
 
 ## Private Class Methods ###
