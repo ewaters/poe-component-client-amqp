@@ -28,7 +28,10 @@ provides:
   POE::Component::Client::AMQP::Queue:
     file: lib/POE/Component/Client/AMQP/Queue.pm
     version: 0.01
-generated_by: Module::Build version 0.33
+  POE::Component::Client::AMQP::TCP:
+    file: lib/POE/Component/Client/AMQP/TCP.pm
+    version: 0.01
+generated_by: Module::Build version 0.2808
 meta-spec:
-  url: http://module-build.sourceforge.net/META-spec-v1.4.html
-  version: 1.4
+  url: http://module-build.sourceforge.net/META-spec-v1.2.html
+  version: 1.2
