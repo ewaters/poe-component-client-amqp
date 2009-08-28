@@ -355,7 +355,9 @@ sub server_input {
             $content_meta->{$_} = $consumer_data->{$_} foreach qw(queue opts);
 
             # Let the consumer know via the recorded callback
-            my $callback_return = $consumer_data->{callback}($content_meta->{payload}, $content_meta);
+            my $callback_return = $consumer_data->{callback}($content_meta->{payload},
+							     $content_meta,
+							     $content_meta->{method_frame}->delivery_tag);
 
             # The return value is normally ignored unless the Consume call had 'no_ack => 0',
             # in which case a 'true' response from the callback will automatically ack

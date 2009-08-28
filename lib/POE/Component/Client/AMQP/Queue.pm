@@ -116,13 +116,23 @@ Optionally provide %opts which will override defaults for the Basic.Consume call
 
 The argument signature of the callback is like so:
 
-  my $do_ack = $subref->($message, $meta)
+  my $do_ack = $subref->($message, $meta,$delivery_tag)
 
 =over 4
 
 =item I<$do_ack>
 
-If in the %opts hash you choose 'no_ack => 0', then messages have to be explicitly ack'ed once handled.  If your callback returns true in this condition, an ack message will automatically be sent for you.
+If in the %opts hash you choose 'no_ack => 0', then messages have to be explicitly ack'ed once handled.
+
+If your callback returns true in this condition, an ack message will automatically be sent for you.
+
+If you want to send your own ack / reject messages, make sure the callback returns undef and use the $delivery_tag to create the response:
+
+  $channel->send_frames(
+    Net::AMQP::Protocol::Basic::Ack->new(
+      delivery_tag => $delivery_tag
+    );
+  );
 
 =item I<$message>
 
