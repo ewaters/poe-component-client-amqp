@@ -181,6 +181,7 @@ sub create {
     );
 
     $self{RemotePort} ||= $self{SSL} ? 5671 : 5672;
+    $self{Reader} = Net::AMQP->reader;
 
     $self{Logger} ||= POE::Component::Client::AMQP::FakeLogger->new(
         debug => keys(%{ $self{Debug} }) ? 1 : 0,
@@ -350,7 +351,7 @@ The following options are supported, all of which are optional, some having sane
 
 =back
 
-=item I<Content options)
+=item I<Content options>
 
 =over 4
 
@@ -645,7 +646,7 @@ sub tcp_server_input {
     $self->{Logger}->debug("Server said: " . $self->{Debug}{raw_dumper}($input))
         if $self->{Debug}{raw_input};
 
-    my @frames = Net::AMQP->parse_raw_frames(\$input);
+    my @frames = $self->{Reader}->(\$input);
     FRAMES:
     foreach my $frame (@frames) {
         $self->{Logger}->debug(
