@@ -139,7 +139,13 @@ The POE session alias of the TCP client
 
 =item I<Callbacks> (default: {})
 
-Provide callbacks.  At the moment, 'Startup' is the only recognized callback.
+Provide callbacks.  At the moment, 'Startup', 'ConnectError' and 'ServerError' are the only recognized callbacks.
+
+Example:
+
+  Callbacks => {
+     ConnectError => [ sub {  die join(", ",@_) }],
+  }
 
 =item I<is_testing>
 
@@ -228,7 +234,16 @@ sub create {
         Connected     => sub { $self->tcp_connected(@_) },
         Disconnected  => sub { $self->Logger->info("TCP connection is disconnected") },
         ServerInput   => sub { $self->tcp_server_input(@_) },
-        ServerError   => sub { $self->tcp_server_error(@_) },
+        ServerError   => sub { if ($self->{Callbacks}{ServerError}) {
+                                 $_->(@_) for @{$self->{Callbacks}{ServerError}};
+                               }
+                               $self->tcp_server_error(@_);
+                             },
+        ConnectError   => sub { if ($self->{Callbacks}{ConnectError}) {
+                                 $_->(@_) for @{$self->{Callbacks}{ConnectError}};
+                               }
+                               $self->tcp_server_error(@_);
+                             },
         Filter        => 'POE::Filter::Stream',
         SSL           => $self->{SSL},
     ) unless $self->{is_testing};
