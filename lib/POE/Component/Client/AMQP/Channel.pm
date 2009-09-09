@@ -103,6 +103,7 @@ sub create {
                 server_input
                 server_send
                 channel_created
+                _stop
             )],
         ],
     );
@@ -373,6 +374,8 @@ sub _start {
         );
     });
 }
+
+sub _stop {}
 
 sub channel_created {
     my ($self, $kernel) = @_[OBJECT, KERNEL];

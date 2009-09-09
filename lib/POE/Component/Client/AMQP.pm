@@ -223,6 +223,7 @@ sub create {
                 server_disconnect
                 shutdown
                 keepalive
+                _stop
             )],
         ],
     ) unless $self->{is_testing};
@@ -462,6 +463,8 @@ sub _start {
 
     $kernel->alias_set($self->{Alias});
 }
+
+sub _stop { 0 }
 
 =head2 server_disconnect
 
