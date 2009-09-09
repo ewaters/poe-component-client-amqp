@@ -139,7 +139,7 @@ The POE session alias of the TCP client
 
 =item I<Callbacks> (default: {})
 
-Provide callbacks.  At the moment, 'Startup', 'ConnectError' and 'ServerError' are the only recognized callbacks.
+Provide callbacks.  At the moment, 'Startup', 'ConnectError', 'Disconnected', and 'ServerError' are the only recognized callbacks.
 
 Example:
 
@@ -233,7 +233,11 @@ sub create {
         RemoteAddress => $self->{RemoteAddress},
         RemotePort    => $self->{RemotePort},
         Connected     => sub { $self->tcp_connected(@_) },
-        Disconnected  => sub { $self->Logger->info("TCP connection is disconnected") },
+        Disconnected  => sub { $self->Logger->info("TCP connection is disconnected");
+                               if ($self->{Callbacks}{Disconnected}) {
+                                 $_->(@_) for @{$self->{Callbacks}{Disconnected}};
+                               }
+                             },
         ServerInput   => sub { $self->tcp_server_input(@_) },
         ServerError   => sub { if ($self->{Callbacks}{ServerError}) {
                                  $_->(@_) for @{$self->{Callbacks}{ServerError}};

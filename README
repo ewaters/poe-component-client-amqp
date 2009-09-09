@@ -88,8 +88,8 @@ USAGE
         The POE session alias of the TCP client
 
     *Callbacks* (default: {})
-        Provide callbacks. At the moment, 'Startup', 'ConnectError' and
-        'ServerError' are the only recognized callbacks.
+        Provide callbacks. At the moment, 'Startup', 'ConnectError',
+        'Disconnected', and 'ServerError' are the only recognized callbacks.
 
         Example:
 
