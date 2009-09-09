@@ -181,6 +181,61 @@ sub send_frames {
     });
 }
 
+=head2 ack
+
+  $channel->ack($delivery_tag_or_meta,\%opts);
+
+Send a Basic.Ack message. Hand it a delivery_tag or the meta data of the message to acknowledge. The default for %opts is C<multiple => 0>
+
+See L<POE::Component::Client::AMQP::Queue/subscribe>.
+
+=cut
+
+
+sub ack {
+  my ($self,$tag,$in_opts) = @_;
+  if (ref $tag) {
+    $tag = $tag->{method_frame}->delivery_tag;
+  }
+  $in_opts ||= {};
+  my %opts = (
+    multiple => 0,
+    %$in_opts
+  );
+  $self->send_frames(
+    Net::AMQP::Protocol::Basic::Ack->new(
+      delivery_tag => $tag,
+      %opts
+    )
+  );
+}
+
+=head2 reject
+
+ $channel->reject($delivery_tag_or_meta,\%opts);
+
+Like ack() only it sends a Basic.Reject message. The default for %opts is C<requeue => 1>
+
+=cut
+
+sub reject {
+  my ($self,$tag,$in_opts) = @_;
+  if (ref $tag) {
+    $tag = $tag->{method_frame}->delivery_tag;
+  }
+  $in_opts ||= {};
+  my %opts = (
+    requeue => 1,
+    %$in_opts
+  );
+  $self->send_frames(
+    Net::AMQP::Protocol::Basic::Reject->new(
+      delivery_tag => $tag,
+      %opts
+    )
+  );
+}
+
 ### Deferred methods ###
 
 =head2 queue ($name, \%opts)

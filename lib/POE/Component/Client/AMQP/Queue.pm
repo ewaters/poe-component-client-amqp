@@ -128,11 +128,15 @@ If your callback returns true in this condition, an ack message will automatical
 
 If you want to send your own ack / reject messages, make sure the callback returns undef and use the $delivery_tag to create the response:
 
-  $channel->send_frames(
-    Net::AMQP::Protocol::Basic::Ack->new(
-      delivery_tag => $delivery_tag
-    );
-  );
+  $queue->subscribe(sub {
+     my ($msg,$meta,$delivery_tag) = @_;
+     # do stuff, ack later...
+     return undef;
+  }, { no_ack => 0 });
+
+  # later..
+
+  $channel->ack($delivery_tag);
 
 =item I<$message>
 
