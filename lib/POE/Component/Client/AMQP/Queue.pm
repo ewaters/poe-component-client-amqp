@@ -229,7 +229,7 @@ sub subscribe {
 
 =over 4
 
-Sends a message to the queue.  In other words, sends a L<Net::AMQP::Protocol::Basic::Publish> followed by a L<Net::AMQP::Protocol::Basic::ContentHeader> and L<Net::AMQP::Frame::Body> containing the body of the message.
+Sends a message using the queue name as the routing_key.  In other words, sends a L<Net::AMQP::Protocol::Basic::Publish> followed by a L<Net::AMQP::Protocol::Basic::ContentHeader> and L<Net::AMQP::Frame::Body> containing the body of the message.
 
 Optionally pass %opts, which can override any option in the L<Net::AMQP::Protocol::Basic::Publish> ('ticket', 'exchange', 'routing_key', 'mandatory', 'immediate'), L<Net::AMQP::Frame::Header> ('weight') or L<Net::AMQP::Protocol::Basic::ContentHeader> ('content_type', 'content_encoding', 'headers', 'delivery_mode', 'priority', 'correlation_id', 'reply_to', 'expiration', 'message_id', 'timestamp', 'type', 'user_id', 'app_id', 'cluster_id') objects.  See the related documentation for an explaination of each.
 

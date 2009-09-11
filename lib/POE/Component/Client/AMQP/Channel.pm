@@ -350,6 +350,40 @@ sub exchange {
     return 1;
 }
 
+
+=head2 publish ($message, \%opts)
+
+=over 4
+
+Sends a message. In other words, sends a L<Net::AMQP::Protocol::Basic::Publish> followed by a L<Net::AMQP::Protocol::Basic::ContentHeader> and L<Net::AMQP::Frame::Body> containing the body of the message.
+
+Optionally pass %opts, which can override any option in the L<Net::AMQP::Protocol::Basic::Publish> ('ticket', 'exchange', 'routing_key', 'mandatory', 'immediate'), L<Net::AMQP::Frame::Header> ('weight') or L<Net::AMQP::Protocol::Basic::ContentHeader> ('content_type', 'content_encoding', 'headers', 'delivery_mode', 'priority', 'correlation_id', 'reply_to', 'expiration', 'message_id', 'timestamp', 'type', 'user_id', 'app_id', 'cluster_id') objects.  See the related documentation for an explaination of each.
+
+You will likely want to set exchange or routing_key or both.
+
+=back
+
+=cut
+
+sub publish {
+    my ($self, $message, $user_opts) = @_;
+    $user_opts ||= {};
+
+    $self->do_when_created(sub {
+        my %opts = (
+            content_type => 'application/octet-stream',
+            %$user_opts,
+        );
+
+        $poe_kernel->post($self->{Alias}, server_send => 
+            $self->{server}->compose_basic_publish($message, %opts)
+        );
+    });
+
+    return $self;
+}
+
+
 =head1 POE STATES
 
 The following are states you can post to to interact with the client.  Use the alias defined in the C<create()> call above.
