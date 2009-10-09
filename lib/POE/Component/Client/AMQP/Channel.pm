@@ -47,6 +47,10 @@ The L<POE::Session> alias so you can post to it's POE states.
 
 At the moment, only 'Created' is used.
 
+=item I<CascadeFailure> (default: 1)
+
+If this channel is closed, close also the server connection.
+
 =back
 
 Returns an object in this class.
@@ -54,6 +58,8 @@ Returns an object in this class.
 =back
 
 =cut
+
+my $_ids = 0;
 
 sub create {
     my $class = shift;
@@ -65,6 +71,8 @@ sub create {
         # User definable
         Alias     => 0,
         Callbacks => { default => {} },
+        CascadeFailure => { default => 1 },
+        CloseCallback => { default => sub {} },
         
         # Private
         consumers => { default => {} },
@@ -90,7 +98,7 @@ sub create {
 
     # Ensure we have a unique alias name
 
-    $args{Alias} ||= $args{server}{Alias} . '-channel-' . $args{id};
+    $args{Alias} ||= $args{server}{Alias} . '-channel-' . $_ids++;
 
     # Create the object and session
 
@@ -248,6 +256,16 @@ sub queue {
     return $queue;
 }
 
+sub close {
+    my $self = shift;
+
+    $self->do_when_created(sub {
+        $poe_kernel->post($self->{Alias}, server_send => 
+            Net::AMQP::Protocol::Channel::Close->new()
+        );
+    });
+}
+
 =head1 POE STATES
 
 The following are states you can post to to interact with the client.  Use the alias defined in the C<create()> call above.
@@ -289,6 +307,10 @@ sub channel_created {
 sub server_input {
     my ($self, $kernel, $frame) = @_[OBJECT, KERNEL, ARG0];
 
+    if ($self->{should_be_dead}) {
+        $self->server->{Logger}->error("!! I should be dead !!");
+    }
+
     if ($frame->isa('Net::AMQP::Frame::Method')) {
         my $method_frame = $frame->method_frame;
 
@@ -304,11 +326,66 @@ sub server_input {
             return;
         }
         elsif ($method_frame->isa('Net::AMQP::Protocol::Channel::Close')) {
-            $self->server->{Logger}->error(
-                "Channel ".$self->id." has been closed by the server: " .
-                $method_frame->reply_code . ': ' . $method_frame->reply_text
-            );
-            $self->server->stop();
+            # Come up with a descriptive reason why the channel closed
+
+            my $close_reason;
+            # If the Channel.Close event gives class and method id indicating what event cause the closure, find a
+            # friendly name from this and use it in the close reason
+            if ($method_frame->class_id && $method_frame->method_id) {
+                my $method_class = Net::AMQP::Frame::Method->registered_method_class($method_frame->class_id, $method_frame->method_id);
+                my ($class_name, $method_name) = $method_class =~ m{^Net::AMQP::Protocol::(.+)::(.+)$};
+                $close_reason = "The method $class_name.$method_name caused channel " . $self->id . ' to be';
+            }
+            else {
+                $close_reason = "The channel has been";
+            }
+            $close_reason .= ' closed by the server: ' . $method_frame->reply_code . ': ' . $method_frame->reply_text;
+
+            $self->server->{Logger}->error($close_reason);
+
+            if ($self->{CloseCallback}) {
+                $self->{CloseCallback}->($close_reason);
+            }
+
+            if ($self->{CascadeFailure}) {
+                $self->server->stop()
+            }
+            else {
+                $kernel->call($self->{Alias}, 'server_send',
+                    Net::AMQP::Protocol::Channel::CloseOk->new()
+                );
+            }
+
+            # Delete references to myself in the server
+            delete $self->server->{channels}{ $self->id };
+            delete $self->server->{wait_synchronous}{ $self->id };
+
+            # Delete the reference to the server to reduce circular references
+            #$self->{server} = undef;;
+            $self->{should_be_dead} = 1;
+
+            $kernel->alias_remove( $self->{Alias} );
+
+            return;
+        }
+        elsif ($method_frame->isa('Net::AMQP::Protocol::Channel::CloseOk')) {
+            if ($self->{CloseOkCallback}) {
+                $self->{CloseOkCallback}->();
+            }
+
+            # Delete references to myself in the server
+            delete $self->server->{channels}{ $self->id };
+            delete $self->server->{wait_synchronous}{ $self->id };
+
+            $self->server->{Logger}->info("Closing channel ".$self->id."; now have channels " . join(', ', sort { $a <=> $b } keys %{ $self->server->{channels} }) . " open");
+
+            # Delete the reference to the server to reduce circular references
+            #$self->{server} = undef;;
+            $self->{should_be_dead} = 1;
+
+            $kernel->alias_remove( $self->{Alias} );
+
+            return;
         }
 
     }

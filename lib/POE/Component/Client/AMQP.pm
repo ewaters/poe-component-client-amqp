@@ -271,7 +271,8 @@ Call with an optional argument $id (1 - 65536).  Returns a L<POE::Component::Cli
 =cut
 
 sub channel {
-    my ($self, $id) = @_;
+    my ($self, $id, $opts) = @_;
+    $opts ||= {};
 
     if (defined $id && $self->{channels}{$id}) {
         return $self->{channels}{$id};
@@ -280,6 +281,7 @@ sub channel {
     my $channel = POE::Component::Client::AMQP::Channel->create(
         id => $id,
         server => $self,
+        %$opts,
     );
 
     # We don't need to record the channel, as the Channel->create() did so already in our 'channels' hash
@@ -536,28 +538,31 @@ sub server_send {
 
             my $output_class = ref($output->method_frame);
 
+            $self->{wait_synchronous}{ $output->channel } ||= {};
+            my $wait_synchronous = $self->{wait_synchronous}{ $output->channel };
+
             # FIXME: It appears that RabbitMQ won't let us do two disimilar synchronous requests at once
-            if (my @waiting_classes = keys %{ $self->{wait_synchronous} }) {
+            if (my @waiting_classes = keys %$wait_synchronous) {
                 $self->{Logger}->debug("Class $waiting_classes[0] is already waiting; do nothing else until it's complete; defering")
                     if $self->{Debug}{logic};
-                push @{ $self->{wait_synchronous}{$waiting_classes[0]}{process_after} }, [ $output, @output ];
+                push @{ $wait_synchronous->{ $waiting_classes[0] }{process_after} }, [ $output, @output ];
                 return;
             }
 
-            if ($self->{wait_synchronous}{$output_class}) {
-                # There are already other things waiting; enqueue this output
-                $self->{Logger}->debug("Class $output_class is already synchronously waiting; defering this and subsequent output")
-                    if $self->{Debug}{logic};
-                push @{ $self->{wait_synchronous}{$output_class}{process_after} }, [ $output, @output ];
-                return;
-            }
+            # if ($self->{wait_synchronous}{$output_class}) {
+            #     # There are already other things waiting; enqueue this output
+            #     $self->{Logger}->debug("Class $output_class is already synchronously waiting; defering this and subsequent output")
+            #         if $self->{Debug}{logic};
+            #     push @{ $self->{wait_synchronous}{$output_class}{process_after} }, [ $output, @output ];
+            #     return;
+            # }
 
             my $responses = $output_class->method_spec->{responses};
 
             if (keys %$responses) {
                 $self->{Logger}->debug("Setting up synchronous callback for $output_class")
                     if $self->{Debug}{logic};
-                $self->{wait_synchronous}{$output_class} = {
+                $wait_synchronous->{$output_class} = {
                     request  => $output,
                     responses => $responses,
                     process_after => [],
@@ -571,9 +576,8 @@ sub server_send {
             . ($self->{Debug}{frame_output} ? $self->{Debug}{frame_dumper}($output) : '')
             . ($self->{Debug}{raw_output} ? $self->{Debug}{raw_dumper}($raw_output) : '')
         );
-        $output = $raw_output;
 
-        $self->{HeapTCP}{server}->put($output);
+        $self->{HeapTCP}{server}->put($raw_output);
         $self->{last_server_put} = time;
     }
 }
@@ -653,6 +657,17 @@ sub tcp_server_input {
             . ($self->{Debug}{frame_input} ? $self->{Debug}{frame_dumper}($frame) : '')
         );
 
+        my $handled = 0;
+        if ($frame->channel != 0) {
+            my $channel = $self->{channels}{ $frame->channel };
+            if (! $channel) {
+                $self->{Logger}->error("Received frame on channel ".$frame->channel." which we didn't request the creation of");
+                next FRAMES;
+            }
+            $kernel->post($channel->{Alias}, server_input => $frame);
+            $handled++;
+        }
+
         if ($frame->isa('Net::AMQP::Frame::Method')) {
             my $method_frame = $frame->method_frame;
 
@@ -662,7 +677,7 @@ sub tcp_server_input {
                 $self->{Logger}->debug("Checking 'wait_synchronous' hash against $method_frame_class") if $self->{Debug}{logic};
 
                 my $matching_output_class;
-                while (my ($output_class, $details) = each %{ $self->{wait_synchronous} }) {
+                while (my ($output_class, $details) = each %{ $self->{wait_synchronous}{ $frame->channel } }) {
                     next unless $details->{responses}{ $method_frame_class };
                     $matching_output_class = $output_class;
                     last;
@@ -672,7 +687,7 @@ sub tcp_server_input {
                     $self->{Logger}->debug("Response type '$method_frame_class' found from waiting request '$matching_output_class'")
                         if $self->{Debug}{logic};
 
-                    my $details = delete $self->{wait_synchronous}{$matching_output_class};
+                    my $details = delete $self->{wait_synchronous}{ $frame->channel }{$matching_output_class};
 
                     # Call the asynch callback if there is one
                     if (my $callback = delete $details->{request}{synchronous_callback}) {
@@ -687,12 +702,12 @@ sub tcp_server_input {
                     }
 
                     # Consider this frame handled
-                    next FRAMES;
+                    $handled++;
                 }
             }
 
             # Act upon connection-level methods
-            if ($frame->channel == 0) {
+            if (! $handled && $frame->channel == 0) {
                 if ($method_frame->isa('Net::AMQP::Protocol::Connection::Start')) {
                     $kernel->post($self->{Alias}, server_send =>
                         Net::AMQP::Protocol::Connection::StartOk->new(
@@ -707,7 +722,7 @@ sub tcp_server_input {
                             locale => 'en_US',
                         ),
                     );
-                    next FRAMES;
+                    $handled++;
                 }
                 elsif ($method_frame->isa('Net::AMQP::Protocol::Connection::Tune')) {
                     $kernel->post($self->{Alias}, server_send =>
@@ -727,20 +742,12 @@ sub tcp_server_input {
                             ),
                         ),
                     );
-                    next FRAMES;
+                    $handled++;
                 }
             }
         }
 
-        if ($frame->channel != 0) {
-            my $channel = $self->{channels}{ $frame->channel };
-            if (! $channel) {
-                $self->{Logger}->error("Received frame on channel ".$frame->channel." which we didn't request the creation of");
-                next FRAMES;
-            }
-            $kernel->post($channel->{Alias}, server_input => $frame);
-        }
-        else {
+        if (! $handled) {
             $self->{Logger}->error("Unhandled input frame ".ref($frame));
         }
     }
