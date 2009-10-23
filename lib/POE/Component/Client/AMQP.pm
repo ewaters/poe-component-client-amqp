@@ -39,7 +39,7 @@ use Net::AMQP;
 use Net::AMQP::Common qw(:all);
 use Carp;
 use base qw(Exporter Class::Accessor);
-__PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping));
+__PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping frame_max));
 
 our $VERSION = 0.01;
 
@@ -176,6 +176,7 @@ sub create {
             is_started    => { default => 0 },
             is_testing    => { default => 0 },
             is_stopped    => { default => 0 },
+            frame_max     => { default => 0 },
         },
         allow_extra => 1,
     );
@@ -227,6 +228,7 @@ sub create {
         Connected     => sub { $self->tcp_connected(@_) },
         Disconnected  => sub { $self->Logger->info("TCP connection is disconnected") },
         ServerInput   => sub { $self->tcp_server_input(@_) },
+        ServerFlushed => sub { $self->tcp_server_flush(@_) },
         ServerError   => sub { $self->tcp_server_error(@_) },
         Filter        => 'POE::Filter::Stream',
         SSL           => $self->{SSL},
@@ -423,17 +425,30 @@ sub compose_basic_publish {
         cluster_id       => 0,
     });
 
+    my $payload_size = length $payload;
+    my @body_frames;
+    while (length $payload) {
+        my $partial = substr $payload, 0, $self->frame_max, '';
+        push @body_frames, Net::AMQP::Frame::Body->new(payload => $partial);
+    }
+
     return (
-        Net::AMQP::Protocol::Basic::Publish->new(%opts),
+        Net::AMQP::Protocol::Basic::Publish->new(
+            map { $_ => $opts{$_} }
+            grep { defined $opts{$_} }
+            qw(ticket exchange routing_key mandatory immediate)
+        ),
         Net::AMQP::Frame::Header->new(
             weight       => $opts{weight},
-            body_size    => length($payload),
-            header_frame => Net::AMQP::Protocol::Basic::ContentHeader->new(%opts),
+            body_size    => $payload_size,
+            header_frame => Net::AMQP::Protocol::Basic::ContentHeader->new(
+                map { $_ => $opts{$_} }
+                grep { defined $opts{$_} }
+                qw(content_type content_encoding headers delivery_mode priority correlation_id
+                reply_to expiration message_id timestamp type user_id app_id cluster_id)
+            ),
         ),
-        (length($payload) > 0 ? (
-        # TODO: split the message into parts if it exceeds the limits set by the Connection.Tune method
-        Net::AMQP::Frame::Body->new(payload => $payload),
-        ) : () ),
+        @body_frames,
     );
 }
 
@@ -642,9 +657,29 @@ sub tcp_connected {
     $self->{HeapTCP} = $heap;
 }
 
+sub tcp_server_flush {
+    my $self = shift;
+    my ($kernel, $heap) = @_[KERNEL, HEAP];
+
+    #$self->{Logger}->debug("Server flush");
+}
+
 sub tcp_server_input {
     my $self = shift;
     my ($kernel, $heap, $input) = @_[KERNEL, HEAP, ARG0];
+
+    # FIXME: Not every record is complete; it may be split at 16384 bytes
+    # FIXME: Checking last octet is not best; find better way!
+    my $frame_end_octet = unpack 'C', substr $input, -1, 1;
+    if ($frame_end_octet != 206) {
+        $self->{Logger}->debug("Server input length ".length($input)." without frame end octet");
+        $self->{buffered_input} = '' unless defined $self->{buffered_input};
+        $self->{buffered_input} .= $input;
+        return;
+    }
+    elsif (defined $self->{buffered_input}) {
+        $input = delete($self->{buffered_input}) . $input;
+    }
 
     $self->{Logger}->debug("Server said: " . $self->{Debug}{raw_dumper}($input))
         if $self->{Debug}{raw_input};
@@ -725,10 +760,11 @@ sub tcp_server_input {
                     $handled++;
                 }
                 elsif ($method_frame->isa('Net::AMQP::Protocol::Connection::Tune')) {
+                    $self->{frame_max} = $method_frame->frame_max;
                     $kernel->post($self->{Alias}, server_send =>
                         Net::AMQP::Protocol::Connection::TuneOk->new(
                             channel_max => 0,
-                            frame_max => 131072, # TODO - actually act on this number and the Tune value
+                            frame_max => $method_frame->frame_max,
                             heartbeat => 0,
                         ),
                         Net::AMQP::Frame::Method->new(
