@@ -3,3 +3,4 @@ Build
 Makefile
 _build
 blib
+*~
