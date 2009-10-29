@@ -38,25 +38,12 @@ use Params::Validate qw(validate validate_with);
 use Net::AMQP;
 use Net::AMQP::Common qw(:all);
 use Carp;
-use base qw(Exporter Class::Accessor);
+use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping frame_max));
 
 our $VERSION = 0.01;
 
-use constant {
-    AMQP_ACK    => '__amqp_ack__',
-    AMQP_REJECT => '__amqp_reject__',
-};
-
-my @_constants;
-our (@EXPORT_OK, %EXPORT_TAGS);
-BEGIN {
-    @_constants = qw(AMQP_ACK AMQP_REJECT);
-    @EXPORT_OK = (@_constants);
-    %EXPORT_TAGS = ('constants' => [@_constants]);
-};
-
-# Use libraries that require my constants after defining them
+use POE::Component::Client::AMQP::Constants;
 
 use POE qw(
     Filter::Stream

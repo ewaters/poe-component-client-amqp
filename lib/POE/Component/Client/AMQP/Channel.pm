@@ -15,7 +15,7 @@ use warnings;
 use POE;
 use Params::Validate;
 use Carp;
-use POE::Component::Client::AMQP qw(:constants);
+use POE::Component::Client::AMQP::Constants;
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(id server Alias));
 

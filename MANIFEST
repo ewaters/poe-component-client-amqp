@@ -6,6 +6,7 @@ examples/pingpong.pl
 examples/README
 examples/stocks.pl
 lib/POE/Component/Client/AMQP.pm
+lib/POE/Component/Client/AMQP/Constants.pm
 lib/POE/Component/Client/AMQP/Channel.pm
 lib/POE/Component/Client/AMQP/Queue.pm
 lib/POE/Component/Client/AMQP/TCP.pm
