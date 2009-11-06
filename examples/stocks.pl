@@ -56,6 +56,12 @@ POE::Session->create(
 
         publish_stock_prices => sub {
             my ($kernel, $heap) = @_[KERNEL, HEAP];
+            $kernel->delay(publish_stock_prices => 1);
+
+            if (! $amq->is_started) {
+                $amq->Logger->error("Server not started; not publishing stock prices");
+                return;
+            }
 
             my %stocks = (
                 appl => 170 + rand(1000) / 100.0,
@@ -74,8 +80,6 @@ POE::Session->create(
                     )
                 );
             }
-
-            $kernel->delay(publish_stock_prices => 1);
         },
     },
 );

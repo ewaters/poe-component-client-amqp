@@ -171,6 +171,7 @@ sub create {
             Callbacks     => { default => {} },
             SSL           => { default => 0 },
             Keepalive     => { default => 0 },
+            Reconnect     => { default => 0 },
 
             channels      => { default => {} },
             is_started    => { default => 0 },
@@ -221,17 +222,41 @@ sub create {
         ],
     ) unless $self->{is_testing};
 
+    # If the user passed an arrayref as the RemoteAddress, pick one
+    # at random to connect to.
+    if (ref $self->{RemoteAddress}) {
+        # Shuffle the RemoteAddress array (thanks http://community.livejournal.com/perl/101830.html)
+        my $array = $self->{RemoteAddress};
+        for (my $i = @$array; --$i; ) {
+            my $j = int rand ($i+1);
+            next if $i == $j;
+            @$array[$i,$j] = @$array[$j,$i];
+        }
+
+        # Take the first shuffled address and move it to the back
+        $self->{current_RemoteAddress} = shift @{ $self->{RemoteAddress} };
+        push @{ $self->{RemoteAddress} }, $self->{current_RemoteAddress};
+    }
+    else {
+        $self->{current_RemoteAddress} = $self->{RemoteAddress};
+    }
+
     POE::Component::Client::AMQP::TCP->new(
-        Alias         => $self->{AliasTCP},
-        RemoteAddress => $self->{RemoteAddress},
-        RemotePort    => $self->{RemotePort},
-        Connected     => sub { $self->tcp_connected(@_) },
-        Disconnected  => sub { $self->Logger->info("TCP connection is disconnected") },
-        ServerInput   => sub { $self->tcp_server_input(@_) },
-        ServerFlushed => sub { $self->tcp_server_flush(@_) },
-        ServerError   => sub { $self->tcp_server_error(@_) },
-        Filter        => 'POE::Filter::Stream',
-        SSL           => $self->{SSL},
+        Alias          => $self->{AliasTCP},
+        RemoteAddress  => $self->{current_RemoteAddress},
+        RemotePort     => $self->{RemotePort},
+        Connected      => sub { $self->tcp_connected(@_) },
+        Disconnected   => sub { $self->tcp_disconnected(@_) },
+        ConnectError   => sub { $self->tcp_connect_error(@_) },
+        ConnectTimeout => 20,
+        ServerInput    => sub { $self->tcp_server_input(@_) },
+        ServerFlushed  => sub { $self->tcp_server_flush(@_) },
+        ServerError    => sub { $self->tcp_server_error(@_) },
+        Filter         => 'POE::Filter::Stream',
+        SSL            => $self->{SSL},
+        InlineStates   => {
+            reconnect_delayed => sub { $self->tcp_reconnect_delayed(@_) },
+        },
     ) unless $self->{is_testing};
 
     return $self;
@@ -498,12 +523,7 @@ sub server_connected {
 
     $self->{Logger}->info("Connected to the AMQP server ".($self->{SSL} ? '(over SSL) ' : '')."and ready to act");
 
-    # Call the callbacks if present
-    if ($self->{Callbacks}{Startup}) {
-        foreach my $subref (@{ $self->{Callbacks}{Startup} }) {
-            $subref->();
-        }
-    }
+    $self->do_callback('Startup');
 
     $self->{is_started} = 1;
 
@@ -525,7 +545,13 @@ Pass one or more L<Net::AMQP::Frame> objects.  For short hand, you may pass L<Ne
 sub server_send {
     my ($self, $kernel, @output) = @_[OBJECT, KERNEL, ARG0 .. $#_];
 
-    return if $self->{is_stopped};
+    if ($self->{is_stopped}) {
+        $self->{Logger}->error("Server send called while stopped with ".int(@output)." messages");
+        push @{ $self->{pending_server_send} }, @output;
+        # FIXME: nothing is currently done with this pending server send queue; users can choose
+        # to resend them in their Reconnected callback
+        return;
+    }
 
     while (my $output = shift @output) {
         if (! defined $output || ! ref $output) {
@@ -654,7 +680,14 @@ sub tcp_connected {
     #$self->{Logger}->debug("Sending 4.2.2 Protocol Header");
     $heap->{server}->put( Net::AMQP::Protocol->header );
 
+    # If 'reconnect_attempt' has a value, we have reconnected
+    if ($self->{reconnect_attempt}) {
+        $self->{reconnect_attempt} = 0;
+        $self->do_callback('Reconnected');
+    }
+
     $self->{HeapTCP} = $heap;
+    $self->{is_stopped} = 0;
 }
 
 sub tcp_server_flush {
@@ -799,6 +832,64 @@ sub tcp_server_error {
     }
 
     $self->{Logger}->error("TCP error: $name (num: $num, string: $string)");
+}
+
+sub tcp_connect_error {
+    my $self = shift;
+    my ($kernel, $heap, $name, $num, $string) = @_[KERNEL, HEAP, ARG0, ARG1, ARG2];
+
+    $self->{Logger}->error("TCP connect error: $name (num: $num, string: $string)");
+    $kernel->post($self->{AliasTCP}, 'reconnect_delayed') if $self->{Reconnect};
+}
+
+sub tcp_disconnected {
+    my $self = shift;
+    my ($kernel, $heap) = @_[KERNEL, HEAP];
+
+    $self->{Logger}->error("TCP connection is disconnected");
+
+    # The flag 'is_stopping' will be 1 if server_disconnect was explicitly called
+    return if $self->{is_stopping};
+
+    # We are here due to an error; we should record that we're stopped, and try and reconnect
+    $self->{is_stopped} = 1;
+    $self->{is_started} = 0;
+    $self->{wait_synchronous} = {};
+
+    if ($self->{Reconnect}) {
+        $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
+    }
+
+    $self->do_callback('Disconnected');
+}
+
+sub tcp_reconnect_delayed {
+    my $self = shift;
+    my ($kernel, $heap) = @_[KERNEL, HEAP];
+
+    return unless $self->{Reconnect};
+
+    # Pick a new RemoteAddress if there's more than one
+    if (ref $self->{RemoteAddress}) {
+        $self->{current_RemoteAddress} = shift @{ $self->{RemoteAddress} };
+        push @{ $self->{RemoteAddress} }, $self->{current_RemoteAddress};
+    }
+
+    my $delay = 2 ** ++$self->{reconnect_attempt};
+    $self->{Logger}->info("Reconnecting to '$$self{current_RemoteAddress}' in $delay sec");
+
+    # This state is in the TCP session, so we can call 'reconnect' directly
+    $kernel->delay('reconnect', $delay, $self->{current_RemoteAddress}, $self->{RemotePort});
+}
+
+sub do_callback {
+    my ($self, $callback) = @_;
+
+    return unless $self->{Callbacks}{$callback};
+    foreach my $subref (@{ $self->{Callbacks}{$callback} }) {
+        $subref->($self);
+    }
+    return;
 }
 
 {

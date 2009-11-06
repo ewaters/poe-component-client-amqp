@@ -101,7 +101,7 @@ sub created {
     my $self = shift;
 
     $self->{is_created} = 1;
-    while (my $callback = shift @{ $self->{on_created} }) {
+    foreach my $callback (@{ $self->{on_created} }) {
         $callback->();
     }
 }

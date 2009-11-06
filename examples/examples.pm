@@ -22,7 +22,17 @@ my $debug = defined $ENV{DEBUG} ? $ENV{DEBUG} : 1;
 Net::AMQP::Protocol->load_xml_spec($ARGV[0] || $FindBin::Bin . '/../../net-amqp/spec/amqp0-8.xml');
 
 our $amq = POE::Component::Client::AMQP->create(
-    RemoteAddress => '127.0.0.1',
+    RemoteAddress => [qw(127.0.0.1 127.0.0.2)],
+
+    Reconnect     => 1,
+    Callbacks     => {
+        Reconnected => [
+            sub {
+                my $amq = shift;
+                $amq->Logger->info("We have been reconnected");
+            },
+        ],
+    },
 
     ($debug ? (
     Debug         => {

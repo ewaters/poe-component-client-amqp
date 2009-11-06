@@ -35,6 +35,11 @@ POE::Session->create(
             my ($kernel, $heap) = @_[KERNEL, HEAP];
             $kernel->delay(clock => 1);
 
+            if (! $amq->is_started) {
+                $amq->Logger->error("Server not started; not publishing time to 'amq.fanout'");
+                return;
+            }
+
             my $message = time . '';
             $amq->Logger->info("Sending '$message' to exchange 'amq.fanout'");
             

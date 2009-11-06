@@ -27,9 +27,15 @@ POE::Session->create(
 
         ping => sub {
             my ($kernel, $heap) = @_[KERNEL, HEAP];
+            $kernel->delay(ping => 1);
+
+            if (! $amq->is_started) {
+                $amq->Logger->error("Server not started; not sending 'ping'");
+                return;
+            }
+
             $channel->queue('one')->publish('ping');
             $amq->Logger->info("Sending 'ping' to queue 'one'");
-            $kernel->delay(ping => 1);
         },
     },
 );
