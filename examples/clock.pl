@@ -5,6 +5,8 @@ use warnings;
 use examples;
 use POE;
 
+init();
+
 $channel
     ->queue('every second')
     ->bind(exchange => 'amq.fanout')

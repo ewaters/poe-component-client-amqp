@@ -5,6 +5,8 @@ use warnings;
 use examples;
 use POE;
 
+init();
+
 # Enqueue the Queue.Declare calls first
 
 $channel

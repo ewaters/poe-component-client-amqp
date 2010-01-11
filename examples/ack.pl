@@ -4,6 +4,8 @@ use strict;
 use warnings;
 use examples;
 
+init();
+
 # Create a queue, 'awesome', that will exist after this program ends
 my $queue = $channel->queue(
     'awesome',

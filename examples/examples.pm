@@ -10,7 +10,7 @@ use lib (
 use POE qw(Component::Client::AMQP);
 use base qw(Exporter);
 
-our @EXPORT = qw($amq $channel);
+our @EXPORT = qw($amq $channel init);
 
 # Libraries for the dumper() calls
 use YAML::XS;
@@ -19,42 +19,50 @@ use Term::ANSIColor qw(:constants);
 
 my $debug = defined $ENV{DEBUG} ? $ENV{DEBUG} : 1;
 
-Net::AMQP::Protocol->load_xml_spec($ARGV[0] || $FindBin::Bin . '/../../net-amqp/spec/amqp0-8.xml');
+Net::AMQP::Protocol->load_xml_spec($FindBin::Bin . '/../../net-amqp/spec/amqp0-8.xml');
 
-our $amq = POE::Component::Client::AMQP->create(
-    RemoteAddress => [qw(127.0.0.1 127.0.0.2)],
+our ($amq, $channel);
 
-    Reconnect     => 1,
-    Callbacks     => {
-        Reconnected => [
-            sub {
-                my $amq = shift;
-                $amq->Logger->info("We have been reconnected");
+sub init {
+    my (%args) = @_;
+
+    $args{Callbacks}{Reconnected} = [
+        sub {
+            my $amq = shift;
+            $amq->Logger->info("We have been reconnected");
+        },
+    ];
+    
+    $amq = POE::Component::Client::AMQP->create(
+        RemoteAddress => [qw(127.0.0.1 127.0.0.2)],
+
+        Reconnect     => 1,
+
+        ($debug ? (
+        Debug         => {
+            logic        => 1,
+
+            frame_input  => 1,
+            frame_output => 1,
+            frame_dumper => sub {
+                my $output = YAML::XS::Dump(shift);
+                chomp $output;
+                return "\n" . BLUE . $output . RESET;
             },
-        ],
-    },
 
-    ($debug ? (
-    Debug         => {
-        logic        => 1,
-
-        frame_input  => 1,
-        frame_output => 1,
-        frame_dumper => sub {
-            my $output = YAML::XS::Dump(shift);
-            chomp $output;
-            return "\n" . BLUE . $output . RESET;
+            raw_input    => 1,
+            raw_output   => 1,
+            raw_dumper => sub {
+                my $raw = shift;
+                my $output = "raw [".length($raw)."]: ".show_ascii($raw);
+                return "\n" . YELLOW . $output . RESET;
+            },
         },
+        ) : ()),
+        %args,
+    );
 
-        raw_input    => 1,
-        raw_output   => 1,
-        raw_dumper => sub {
-            my $raw = shift;
-            my $output = "raw [".length($raw)."]: ".show_ascii($raw);
-            return "\n" . YELLOW . $output . RESET;
-        },
-    },
-    ) : ()),
-);
+    $channel = $amq->channel();
+}
 
-our $channel = $amq->channel();
+1;

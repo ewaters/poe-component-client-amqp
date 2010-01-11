@@ -139,7 +139,9 @@ The POE session alias of the TCP client
 
 =item I<Callbacks> (default: {})
 
-Provide callbacks.  At the moment, 'Startup' is the only recognized callback.
+Provide callbacks.  At the moment, 'Startup' and 'FrameSent' are the only recognized callback.
+
+FrameSent will be called with $self and the Net::AMQP::Frame being sent.
 
 =item I<is_testing>
 
@@ -620,6 +622,7 @@ sub server_send {
 
         $self->{HeapTCP}{server}->put($raw_output);
         $self->{last_server_put} = time;
+        $self->do_callback('FrameSent', $output);
     }
 }
 
@@ -883,11 +886,11 @@ sub tcp_reconnect_delayed {
 }
 
 sub do_callback {
-    my ($self, $callback) = @_;
+    my ($self, $callback, @args) = @_;
 
     return unless $self->{Callbacks}{$callback};
     foreach my $subref (@{ $self->{Callbacks}{$callback} }) {
-        $subref->($self);
+        $subref->($self, @args);
     }
     return;
 }

@@ -5,6 +5,8 @@ use warnings;
 use examples;
 use POE;
 
+init();
+
 $channel->queue('one')->subscribe(sub {
     my $msg = shift;
     $amq->Logger->info("Queue 'one' received message '$msg'; sending 'pong' to queue 'two'");
