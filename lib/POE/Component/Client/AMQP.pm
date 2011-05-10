@@ -254,7 +254,7 @@ sub create {
         ServerInput    => sub { $self->tcp_server_input(@_) },
         ServerFlushed  => sub { $self->tcp_server_flush(@_) },
         ServerError    => sub { $self->tcp_server_error(@_) },
-        Filter         => 'POE::Filter::Stream',
+        Filter         => 'POE::Component::Client::AMQP::Filter::Frame',
         SSL            => $self->{SSL},
         InlineStates   => {
             reconnect_delayed => sub { $self->tcp_reconnect_delayed(@_) },
@@ -893,6 +893,16 @@ sub do_callback {
         $subref->($self, @args);
     }
     return;
+}
+
+{
+    package POE::Component::Client::AMQP::Filter::Frame;
+    our @ISA = qw(POE::Filter::Stream);
+    sub get_one {
+	my $self = shift;
+        my $size = Net::AMQP->next_raw_frame_size($self);
+	return $size > 0 ? [ substr($$self, 0, $size, '') ] : [ ];
+    }
 }
 
 {
