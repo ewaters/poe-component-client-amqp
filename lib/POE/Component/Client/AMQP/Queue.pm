@@ -116,13 +116,27 @@ Optionally provide %opts which will override defaults for the Basic.Consume call
 
 The argument signature of the callback is like so:
 
-  my $do_ack = $subref->($message, $meta)
+  my $do_ack = $subref->($message, $meta,$delivery_tag)
 
 =over 4
 
 =item I<$do_ack>
 
-If in the %opts hash you choose 'no_ack => 0', then messages have to be explicitly ack'ed once handled.  If your callback returns true in this condition, an ack message will automatically be sent for you.
+If in the %opts hash you choose 'no_ack => 0', then messages have to be explicitly ack'ed once handled.
+
+If your callback returns true in this condition, an ack message will automatically be sent for you.
+
+If you want to send your own ack / reject messages, make sure the callback returns undef and use the $delivery_tag to create the response:
+
+  $queue->subscribe(sub {
+     my ($msg,$meta,$delivery_tag) = @_;
+     # do stuff, ack later...
+     return undef;
+  }, { no_ack => 0 });
+
+  # later..
+
+  $channel->ack($delivery_tag);
 
 =item I<$message>
 
@@ -215,7 +229,7 @@ sub subscribe {
 
 =over 4
 
-Sends a message to the queue.  In other words, sends a L<Net::AMQP::Protocol::Basic::Publish> followed by a L<Net::AMQP::Protocol::Basic::ContentHeader> and L<Net::AMQP::Frame::Body> containing the body of the message.
+Sends a message using the queue name as the routing_key.  In other words, sends a L<Net::AMQP::Protocol::Basic::Publish> followed by a L<Net::AMQP::Protocol::Basic::ContentHeader> and L<Net::AMQP::Frame::Body> containing the body of the message.
 
 Optionally pass %opts, which can override any option in the L<Net::AMQP::Protocol::Basic::Publish> ('ticket', 'exchange', 'routing_key', 'mandatory', 'immediate'), L<Net::AMQP::Frame::Header> ('weight') or L<Net::AMQP::Protocol::Basic::ContentHeader> ('content_type', 'content_encoding', 'headers', 'delivery_mode', 'priority', 'correlation_id', 'reply_to', 'expiration', 'message_id', 'timestamp', 'type', 'user_id', 'app_id', 'cluster_id') objects.  See the related documentation for an explaination of each.
 
@@ -242,7 +256,7 @@ sub publish {
     return $self;
 }
 
-=head2 bind (%opts)
+=head2 bind ($exchange, \%opts)
 
 =over 4
 
@@ -253,13 +267,14 @@ Shortcut to send a Queue.Bind call with this queue name.  Pass the same args you
 =cut
 
 sub bind {
-    my ($self, %opts) = @_;
+    my ($self, $exchange, $opts) = @_;
 
     $self->do_when_created(sub {
-        $opts{queue} ||= $self->{name};
-        $poe_kernel->post($self->{channel}{Alias}, server_send =>
-            Net::AMQP::Protocol::Queue::Bind->new(%opts)
-        );
+        $opts->{queue} ||= $self->{name};
+	$opts->{exchange} ||= $exchange;
+	my $frame = Net::AMQP::Protocol::Queue::Bind->new(%$opts);
+        $poe_kernel->post($self->{channel}{Alias}, server_send => $frame );
+
     });
 
     return $self;

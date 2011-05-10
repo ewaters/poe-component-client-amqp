@@ -46,3 +46,4 @@
 \B\._
 # Avoid archives of this distribution
 \bPOE-Component-Client-AMQP-[\d\.\_]+
+.gitignore

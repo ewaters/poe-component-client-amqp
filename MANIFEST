@@ -1,14 +1,19 @@
 Build.PL
 examples/ack.pl
+examples/clock.pl
 examples/examples.pm
 examples/pingpong.pl
 examples/README
+examples/stocks.pl
 lib/POE/Component/Client/AMQP.pm
+lib/POE/Component/Client/AMQP/Constants.pm
 lib/POE/Component/Client/AMQP/Channel.pm
 lib/POE/Component/Client/AMQP/Queue.pm
+lib/POE/Component/Client/AMQP/TCP.pm
 LICENSE
 Makefile.PL
 MANIFEST			This list of files
 META.yml
 README
 t/01_basic.t
+examples/stocknew.pl

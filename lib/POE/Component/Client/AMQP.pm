@@ -38,25 +38,12 @@ use Params::Validate qw(validate validate_with);
 use Net::AMQP;
 use Net::AMQP::Common qw(:all);
 use Carp;
-use base qw(Exporter Class::Accessor);
+use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping frame_max));
 
 our $VERSION = 0.01;
 
-use constant {
-    AMQP_ACK    => '__amqp_ack__',
-    AMQP_REJECT => '__amqp_reject__',
-};
-
-my @_constants;
-our (@EXPORT_OK, %EXPORT_TAGS);
-BEGIN {
-    @_constants = qw(AMQP_ACK AMQP_REJECT);
-    @EXPORT_OK = (@_constants);
-    %EXPORT_TAGS = ('constants' => [@_constants]);
-};
-
-# Use libraries that require my constants after defining them
+use POE::Component::Client::AMQP::Constants;
 
 use POE qw(
     Filter::Stream
@@ -139,9 +126,13 @@ The POE session alias of the TCP client
 
 =item I<Callbacks> (default: {})
 
-Provide callbacks.  At the moment, 'Startup' and 'FrameSent' are the only recognized callback.
+Provide callbacks.  At the moment, 'Startup', 'ConnectError', 'Disconnected', and 'ServerError' are the only recognized callbacks.
 
-FrameSent will be called with $self and the Net::AMQP::Frame being sent.
+Example:
+
+  Callbacks => {
+     ConnectError => [ sub {  die join(", ",@_) }],
+  }
 
 =item I<is_testing>
 
@@ -185,6 +176,7 @@ sub create {
     );
 
     $self{RemotePort} ||= $self{SSL} ? 5671 : 5672;
+    $self{Reader} = Net::AMQP->reader;
 
     $self{Logger} ||= POE::Component::Client::AMQP::FakeLogger->new(
         debug => keys(%{ $self{Debug} }) ? 1 : 0,
@@ -220,6 +212,7 @@ sub create {
                 server_disconnect
                 shutdown
                 keepalive
+                _stop
             )],
         ],
     ) unless $self->{is_testing};
@@ -244,21 +237,30 @@ sub create {
     }
 
     POE::Component::Client::AMQP::TCP->new(
-        Alias          => $self->{AliasTCP},
-        RemoteAddress  => $self->{current_RemoteAddress},
-        RemotePort     => $self->{RemotePort},
-        Connected      => sub { $self->tcp_connected(@_) },
-        Disconnected   => sub { $self->tcp_disconnected(@_) },
-        ConnectError   => sub { $self->tcp_connect_error(@_) },
-        ConnectTimeout => 20,
-        ServerInput    => sub { $self->tcp_server_input(@_) },
-        ServerFlushed  => sub { $self->tcp_server_flush(@_) },
-        ServerError    => sub { $self->tcp_server_error(@_) },
-        Filter         => 'POE::Component::Client::AMQP::Filter::Frame',
-        SSL            => $self->{SSL},
-        InlineStates   => {
-            reconnect_delayed => sub { $self->tcp_reconnect_delayed(@_) },
-        },
+        Alias         => $self->{AliasTCP},
+        RemoteAddress => $self->{RemoteAddress},
+        RemotePort    => $self->{RemotePort},
+        Connected     => sub { $self->tcp_connected(@_) },
+        Disconnected  => sub { $self->Logger->info("TCP connection is disconnected");
+                               if ($self->{Callbacks}{Disconnected}) {
+                                 $_->(@_) for @{$self->{Callbacks}{Disconnected}};
+                               }
+                             },
+        ServerInput   => sub { $self->tcp_server_input(@_) },
+        ServerError   => sub { if ($self->{Callbacks}{ServerError}) {
+                                 $_->(@_) for @{$self->{Callbacks}{ServerError}};
+                               }
+                               $self->tcp_server_error(@_);
+                             },
+        ConnectError   => sub { if ($self->{Callbacks}{ConnectError}) {
+                                 $_->(@_) for @{$self->{Callbacks}{ConnectError}};
+                               }
+                               $self->tcp_server_error(@_);
+                             },
+        ServerFlushed => sub { $self->tcp_server_flush(@_) },
+        ServerError   => sub { $self->tcp_server_error(@_) },
+        Filter        => 'POE::Component::Client::AMQP::Filter::Frame',
+        SSL           => $self->{SSL},
     ) unless $self->{is_testing};
 
     return $self;
@@ -381,7 +383,7 @@ The following options are supported, all of which are optional, some having sane
 
 =back
 
-=item I<Content options)
+=item I<Content options>
 
 =over 4
 
@@ -490,6 +492,8 @@ sub _start {
 
     $kernel->alias_set($self->{Alias});
 }
+
+sub _stop { 0 }
 
 =head2 server_disconnect
 
@@ -703,19 +707,6 @@ sub tcp_server_flush {
 sub tcp_server_input {
     my $self = shift;
     my ($kernel, $heap, $input) = @_[KERNEL, HEAP, ARG0];
-
-    # FIXME: Not every record is complete; it may be split at 16384 bytes
-    # FIXME: Checking last octet is not best; find better way!
-    my $frame_end_octet = unpack 'C', substr $input, -1, 1;
-    if ($frame_end_octet != 206) {
-        $self->{Logger}->debug("Server input length ".length($input)." without frame end octet");
-        $self->{buffered_input} = '' unless defined $self->{buffered_input};
-        $self->{buffered_input} .= $input;
-        return;
-    }
-    elsif (defined $self->{buffered_input}) {
-        $input = delete($self->{buffered_input}) . $input;
-    }
 
     $self->{Logger}->debug("Server said: " . $self->{Debug}{raw_dumper}($input))
         if $self->{Debug}{raw_input};
