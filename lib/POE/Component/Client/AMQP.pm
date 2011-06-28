@@ -176,7 +176,6 @@ sub create {
     );
 
     $self{RemotePort} ||= $self{SSL} ? 5671 : 5672;
-    $self{Reader} = Net::AMQP->reader;
 
     $self{Logger} ||= POE::Component::Client::AMQP::FakeLogger->new(
         debug => keys(%{ $self{Debug} }) ? 1 : 0,
