@@ -244,7 +244,7 @@ sub create {
                                if ($self->{Callbacks}{Disconnected}) {
                                  $_->(@_) for @{$self->{Callbacks}{Disconnected}};
                                }
-                               $self->tcp_server_error(@_);
+                               $self->tcp_disconnected(@_);
                              },
         ServerInput   => sub { $self->tcp_server_input(@_) },
         ServerError   => sub { if ($self->{Callbacks}{ServerError}) {
@@ -255,10 +255,9 @@ sub create {
         ConnectError   => sub { if ($self->{Callbacks}{ConnectError}) {
                                  $_->(@_) for @{$self->{Callbacks}{ConnectError}};
                                }
-                               $self->tcp_server_error(@_);
+                               $self->tcp_connect_error(@_);
                              },
         ServerFlushed => sub { $self->tcp_server_flush(@_) },
-        ServerError   => sub { $self->tcp_server_error(@_) },
         Filter        => 'POE::Component::Client::AMQP::Filter::Frame',
         SSL           => $self->{SSL},
         ConnRetry =>sub { $self->tcp_reconnect_delayed(@_) },
@@ -825,8 +824,9 @@ sub tcp_server_error {
     if ($name eq 'read' && $num == 0 && $self->{is_stopping}) {
         return;
     }
-    #this appears to be the only callback called or callable.  The rest don't wire into anything.
-	  $self->{is_stopped} = 1;
+    $self->{is_stopped} = 1;
+    $self->{is_started} = 0;
+    $self->{wait_synchronous} = {};
     $self->{Logger}->error("TCP error: $name (num: $num, string: $string)");
     if ($self->{Reconnect}) {
         $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
@@ -836,7 +836,9 @@ sub tcp_server_error {
 sub tcp_connect_error {
     my $self = shift;
     my ($kernel, $heap, $name, $num, $string) = @_[KERNEL, HEAP, ARG0, ARG1, ARG2];
-
+    $self->{is_stopped} = 1;
+    $self->{is_started} = 0;
+    $self->{wait_synchronous} = {};
     $self->{Logger}->error("TCP connect error: $name (num: $num, string: $string)");
     if ($self->{Reconnect}) {
         $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
@@ -862,7 +864,7 @@ sub tcp_disconnected {
         $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
     }
 
-    $self->do_callback('Disconnected');
+    #$self->do_callback('Disconnected');
 }
 
 sub tcp_reconnect_delayed {
