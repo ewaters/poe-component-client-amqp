@@ -171,6 +171,7 @@ sub create {
             is_testing    => { default => 0 },
             is_stopped    => { default => 0 },
             frame_max     => { default => 0 },
+            connect_delay_max => { default => 60 },
         },
         allow_extra => 1,
     );
@@ -234,7 +235,6 @@ sub create {
     else {
         $self->{current_RemoteAddress} = $self->{RemoteAddress};
     }
-
     POE::Component::Client::AMQP::TCP->new(
         Alias         => $self->{AliasTCP},
         RemoteAddress => $self->{RemoteAddress},
@@ -244,6 +244,7 @@ sub create {
                                if ($self->{Callbacks}{Disconnected}) {
                                  $_->(@_) for @{$self->{Callbacks}{Disconnected}};
                                }
+                               $self->tcp_server_error(@_);
                              },
         ServerInput   => sub { $self->tcp_server_input(@_) },
         ServerError   => sub { if ($self->{Callbacks}{ServerError}) {
@@ -260,6 +261,7 @@ sub create {
         ServerError   => sub { $self->tcp_server_error(@_) },
         Filter        => 'POE::Component::Client::AMQP::Filter::Frame',
         SSL           => $self->{SSL},
+        ConnRetry =>sub { $self->tcp_reconnect_delayed(@_) },
     ) unless $self->{is_testing};
 
     return $self;
@@ -823,8 +825,12 @@ sub tcp_server_error {
     if ($name eq 'read' && $num == 0 && $self->{is_stopping}) {
         return;
     }
-
+    #this appears to be the only callback called or callable.  The rest don't wire into anything.
+	  $self->{is_stopped} = 1;
     $self->{Logger}->error("TCP error: $name (num: $num, string: $string)");
+    if ($self->{Reconnect}) {
+        $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
+    }
 }
 
 sub tcp_connect_error {
@@ -832,7 +838,10 @@ sub tcp_connect_error {
     my ($kernel, $heap, $name, $num, $string) = @_[KERNEL, HEAP, ARG0, ARG1, ARG2];
 
     $self->{Logger}->error("TCP connect error: $name (num: $num, string: $string)");
-    $kernel->post($self->{AliasTCP}, 'reconnect_delayed') if $self->{Reconnect};
+    if ($self->{Reconnect}) {
+        $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
+    }
+
 }
 
 sub tcp_disconnected {
@@ -869,10 +878,13 @@ sub tcp_reconnect_delayed {
     }
 
     my $delay = 2 ** ++$self->{reconnect_attempt};
+    if ($delay > $self->{connect_delay_max}){
+    	$delay = $self->{connect_delay_max};
+    }
     $self->{Logger}->info("Reconnecting to '$$self{current_RemoteAddress}' in $delay sec");
 
     # This state is in the TCP session, so we can call 'reconnect' directly
-    $kernel->delay('reconnect', $delay, $self->{current_RemoteAddress}, $self->{RemotePort});
+    $kernel->delay('connect', $delay, $self->{current_RemoteAddress}, $self->{RemotePort});
 }
 
 sub do_callback {
