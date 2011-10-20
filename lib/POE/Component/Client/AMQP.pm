@@ -150,28 +150,30 @@ sub create {
     my %self = validate_with(
         params => \@_,
         spec => {
-            RemoteAddress => { default => '127.0.0.1' },
-            RemotePort    => 0,
-            Username      => { default => 'guest' },
-            Password      => { default => 'guest' },
-            VirtualHost   => { default => '/' },
+            RemoteAddress     => { default => '127.0.0.1' },
+            RemotePort        => 0,
+            Username          => { default => 'guest' },
+            Password          => { default => 'guest' },
+            VirtualHost       => { default => '/' },
 
-            Logger        => 0,
-            Debug         => { default => {} },
+            Logger            => 0,
+            Debug             => { default => {} },
 
-            Alias         => { default => 'amqp_client' },
-            AliasTCP      => { default => 'tcp_client' },
-            Callbacks     => { default => {} },
-            SSL           => { default => 0 },
-            Keepalive     => { default => 0 },
-            Reconnect     => { default => 0 },
+            Alias             => { default => 'amqp_client' },
+            AliasTCP          => { default => 'tcp_client' },
+            Callbacks         => { default => {} },
+            SSL               => { default => 0 },
+            Keepalive         => { default => 0 },
+            Reconnect         => { default => 0 },
 
-            channels      => { default => {} },
-            is_started    => { default => 0 },
-            is_testing    => { default => 0 },
-            is_stopped    => { default => 0 },
-            frame_max     => { default => 0 },
-            connect_delay_max => { default => 60 },
+            AddressShuffle    => { default => 0 },
+            ConnectDelayMax   => { default => 60 },
+
+            channels          => { default => {} },
+            is_started        => { default => 0 },
+            is_testing        => { default => 0 },
+            is_stopped        => { default => 0 },
+            frame_max         => { default => 0 },
         },
         allow_extra => 1,
     );
@@ -220,15 +222,16 @@ sub create {
     # If the user passed an arrayref as the RemoteAddress, pick one
     # at random to connect to.
     if (ref $self->{RemoteAddress}) {
-        # Shuffle the RemoteAddress array (thanks http://community.livejournal.com/perl/101830.html)
-        my $array = $self->{RemoteAddress};
-        for (my $i = @$array; --$i; ) {
-            my $j = int rand ($i+1);
-            next if $i == $j;
-            @$array[$i,$j] = @$array[$j,$i];
+        if ( $self->{AddressShuffle}) {
+            # Shuffle the RemoteAddress array (thanks http://community.livejournal.com/perl/101830.html)
+            my $array = $self->{RemoteAddress};
+            for (my $i = @$array; --$i; ) {
+                my $j = int rand ($i+1);
+                next if $i == $j;
+                @$array[$i,$j] = @$array[$j,$i];
+            }
         }
-
-        # Take the first shuffled address and move it to the back
+        # Take the first address and move it to the back
         $self->{current_RemoteAddress} = shift @{ $self->{RemoteAddress} };
         push @{ $self->{RemoteAddress} }, $self->{current_RemoteAddress};
     }
@@ -880,8 +883,8 @@ sub tcp_reconnect_delayed {
     }
 
     my $delay = 2 ** ++$self->{reconnect_attempt};
-    if ($delay > $self->{connect_delay_max}){
-    	$delay = $self->{connect_delay_max};
+    if ($delay > $self->{ConnectDelayMax}){
+        $delay = $self->{ConnectDelayMax};
     }
     $self->{Logger}->info("Reconnecting to '$$self{current_RemoteAddress}' in $delay sec");
 
