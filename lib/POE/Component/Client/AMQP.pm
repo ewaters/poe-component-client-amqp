@@ -240,7 +240,7 @@ sub create {
     }
     POE::Component::Client::AMQP::TCP->new(
         Alias         => $self->{AliasTCP},
-        RemoteAddress => $self->{RemoteAddress},
+        RemoteAddress => $self->{current_RemoteAddress},
         RemotePort    => $self->{RemotePort},
         Connected     => sub { $self->tcp_connected(@_) },
         Disconnected  => sub { $self->Logger->info("TCP connection is disconnected");
