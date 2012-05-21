@@ -1,0 +1,5 @@
+0.02  Mon, 21 May 2012 12:30:58 -0400
+   - basic.qos AMQP method by Don Conlon [https://github.com/ewaters/poe-component-client-amqp/pull/1]
+
+0.01  
+    - First working version released to CPAN

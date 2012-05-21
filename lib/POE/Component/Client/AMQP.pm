@@ -41,7 +41,7 @@ use Carp;
 use base qw(Exporter Class::Accessor);
 __PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping frame_max));
 
-our $VERSION = 0.01;
+our $VERSION = 0.02;
 
 use constant {
     AMQP_ACK    => '__amqp_ack__',
@@ -381,7 +381,7 @@ The following options are supported, all of which are optional, some having sane
 
 =back
 
-=item I<Content options)
+=item I<Content options>
 
 =over 4
 
@@ -921,6 +921,10 @@ sub do_callback {
 =head1 SEE ALSO
 
 L<POE>, L<Net::AMQP>
+
+=head1 DEVELOPMENT
+
+This module is being developed via a git repository publicly avaiable at http://github.com/ewaters/poe-component-client-amqp.  I encourage anyone who is interested to fork my code and contribute bug fixes or new features, or just have fun and be creative.
 
 =head1 COPYRIGHT
 

@@ -7,7 +7,7 @@ SYNOPSIS
 
       Net::AMQP::Protocol->load_xml_spec('amqp0-8.xml');
 
-      my $amq = Component::Client::AMQP->create(
+      my $amq = POE::Component::Client::AMQP->create(
           RemoteAddress => 'mq.domain.tld',
       );
 
@@ -33,60 +33,72 @@ DESCRIPTION
     this.
 
 USAGE
-  create (...)
-        Create a new AMQP client. Arguments to this method:
+  create
+      my $amq = POE::Component::Client::AMQP->create(
+          RemoteAddress => 'mq.domain.tld',
+      );
 
-        *RemoteAddress* (default: 127.0.0.1)
-            Connect to this host
+    Create a new AMQP client. Arguments to this method:
 
-        *RemotePort* (default: 5672)
-        *Username* (default: guest)
-        *Password* (default: guest)
-        *VirtualHost* (default: /)
-        *Logger* (default: simple screen logger)
-            Provide an object which implements 'debug', 'info' and 'error'
-            logging methods (such as Log::Log4perl).
+    *RemoteAddress* (default: 127.0.0.1)
+        Connect to this host
 
-        *Debug*
-            This module provides extensive debugging options. These are
-            specified as a hash as follows:
+    *RemotePort* (default: 5672)
+    *Username* (default: guest)
+    *Password* (default: guest)
+    *VirtualHost* (default: /)
+    *Logger* (default: simple screen logger)
+        Provide an object which implements 'debug', 'info' and 'error'
+        logging methods (such as Log::Log4perl).
 
-            *logic* (boolean)
-                Display decisions the code is making
+    *Debug*
+        This module provides extensive debugging options. These are
+        specified as a hash as follows:
 
-            *frame_input* (boolean)
-            *frame_output* (boolean)
-                Use the *frame_dumper* code to display frames that come in
-                from or out to the server.
+        *logic* (boolean)
+            Display decisions the code is making
 
-            *frame_dumper* (coderef)
-                A coderef which, given a Net::AMQP::Frame object, will
-                return a string representation of it, prefixed with "\n".
+        *frame_input* (boolean)
+        *frame_output* (boolean)
+            Use the *frame_dumper* code to display frames that come in from
+            or out to the server.
 
-            *raw_input* (boolean)
-            *raw_output* (boolean)
-                Use the *raw_dumper* code to display raw data that comes in
-                from or out to the server.
+        *frame_dumper* (coderef)
+            A coderef which, given a Net::AMQP::Frame object, will return a
+            string representation of it, prefixed with "\n".
 
-            *raw_dumper* (coderef)
-                A coderef which, given a raw string, will return a byte
-                representation of it, prefixed with "\n".
+        *raw_input* (boolean)
+        *raw_output* (boolean)
+            Use the *raw_dumper* code to display raw data that comes in from
+            or out to the server.
 
-        *Alias* (default: amqp_client)
-            The POE session alias of the main client session
+        *raw_dumper* (coderef)
+            A coderef which, given a raw string, will return a byte
+            representation of it, prefixed with "\n".
 
-        *AliasTCP* (default: tcp_client)
-            The POE session alias of the TCP client
+    *Keepalive* (default: 0)
+        If set, will send a Net::AMQP::Frame::Heartbeat frame every
+        Keepalive seconds after the last activity on the connection. This is
+        a mechanism to keep a long-open TCP session alive.
 
-        *Callbacks* (default: {})
-            Provide callbacks. At the moment, 'Startup' is the only
-            recognized callback.
+    *Alias* (default: amqp_client)
+        The POE session alias of the main client session
 
-        *is_testing*
-            Set to '1' to avoid creating POE::Sessions (mainly useful in t/
-            scripts)
+    *AliasTCP* (default: tcp_client)
+        The POE session alias of the TCP client
 
-        Returns a class object.
+    *Callbacks* (default: {})
+        Provide callbacks. At the moment, 'Startup' and 'FrameSent' are the
+        only recognized callback.
+
+        FrameSent will be called with $self and the Net::AMQP::Frame being
+        sent.
+
+    *is_testing*
+        Set to '1' to avoid creating POE::Sessions (mainly useful in t/
+        scripts)
+
+    Returns a class object.
 
 CLASS METHODS
   do_when_startup (...)
@@ -106,6 +118,47 @@ CLASS METHODS
   stop ()
         Shortcut to calling the POE state 'disconnect'
 
+  compose_basic_publish ($payload, %options)
+        A helper method to generate the frames necessary for a basic
+        publish. Returns a Net::AMQP::Protocol::Basic::Publish,
+        Net::AMQP::Frame::Header (wrapping a
+        Net::AMQP::Protocol::Basic::ContentHeader frame) followed by zero or
+        more Net::AMQP::Frame::Body frames. Since the arguments for each one
+        of these frames are unique, the %options hash provides options for
+        all of the frames.
+
+        The following options are supported, all of which are optional, some
+        having sane defaults:
+
+        *Header options*
+
+            *weight* (default: 0)
+
+        *Method options*
+
+            *ticket* (default: 0)
+            *exchange*
+            *routing_key*
+            *mandatory* (default: 1)
+            *immediate*
+
+        *Content options*
+
+            *content_type*
+            *content_encoding*
+            *headers* (default: {})
+            *delivery_mode* (default: 1)
+            *priority* (default: 1)
+            *correlation_id*
+            *reply_to*
+            *expiration*
+            *message_id*
+            *timestamp*
+            *type*
+            *user_id*
+            *app_id*
+            *cluster_id*
+
 POE STATES
     The following are states you can post to to interact with the client.
     Use the alias defined in the "create()" call above.
@@ -123,8 +176,22 @@ POE STATES
         synchronous method returns properly before sending further
         synchronous frames. This happens automatically.
 
+  shutdown ()
+        If you need to stop things immediately, call shutdown(). This is not
+        graceful.
+
+  keepalive
+    Sends a Heartbeat frame at a regular interval to keep the TCP session
+    from timing out.
+
 SEE ALSO
     POE, Net::AMQP
+
+DEVELOPMENT
+    This module is being developed via a git repository publicly avaiable at
+    http://github.com/ewaters/poe-component-client-amqp. I encourage anyone
+    who is interested to fork my code and contribute bug fixes or new
+    features, or just have fun and be creative.
 
 COPYRIGHT
     Copyright (c) 2009 Eric Waters and XMission LLC

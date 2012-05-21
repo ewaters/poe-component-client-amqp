@@ -1,0 +1,67 @@
+{
+   "abstract" : "Asynchronous AMQP client implementation in POE",
+   "author" : [
+      "Eric Waters <ewaters@gmail.com>"
+   ],
+   "dynamic_config" : 1,
+   "generated_by" : "Module::Build version 0.4, CPAN::Meta::Converter version 2.120921",
+   "license" : [
+      "perl_5"
+   ],
+   "meta-spec" : {
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
+      "version" : "2"
+   },
+   "name" : "POE-Component-Client-AMQP",
+   "prereqs" : {
+      "build" : {
+         "requires" : {
+            "Test::Deep" : "0",
+            "Test::More" : "0"
+         }
+      },
+      "configure" : {
+         "requires" : {
+            "Module::Build" : "0.4"
+         }
+      },
+      "runtime" : {
+         "requires" : {
+            "Class::Accessor" : "0",
+            "Net::AMQP" : "0",
+            "POE" : "0",
+            "POE::Component::Client::TCP" : "0",
+            "Params::Validate" : "0"
+         }
+      }
+   },
+   "provides" : {
+      "POE::Component::Client::AMQP" : {
+         "file" : "lib/POE/Component/Client/AMQP.pm",
+         "version" : "0.02"
+      },
+      "POE::Component::Client::AMQP::Channel" : {
+         "file" : "lib/POE/Component/Client/AMQP/Channel.pm",
+         "version" : "0.02"
+      },
+      "POE::Component::Client::AMQP::FakeLogger" : {
+         "file" : "lib/POE/Component/Client/AMQP.pm",
+         "version" : 0
+      },
+      "POE::Component::Client::AMQP::Queue" : {
+         "file" : "lib/POE/Component/Client/AMQP/Queue.pm",
+         "version" : "0.02"
+      },
+      "POE::Component::Client::AMQP::TCP" : {
+         "file" : "lib/POE/Component/Client/AMQP/TCP.pm",
+         "version" : "0.02"
+      }
+   },
+   "release_status" : "stable",
+   "resources" : {
+      "license" : [
+         "http://dev.perl.org/licenses/"
+      ]
+   },
+   "version" : "0.02"
+}
