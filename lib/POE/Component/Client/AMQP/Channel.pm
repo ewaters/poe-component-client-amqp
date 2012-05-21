@@ -256,6 +256,41 @@ sub queue {
     return $queue;
 }
 
+=head2 qos (\%opts, $on_complete)
+
+=over 4
+
+Requests a specific quality of service from the server.  The %opts are 'prefetch_size' and 'prefetch_count'.
+
+$on_complete is an option callback that will be passed a boolean value indicating whether the QoS was set.
+
+This is a deferred call, similar to L<POE::Component::Client::AMQP::channel()>, so it can be used immediately.
+
+=back
+
+=cut
+
+sub qos {
+    my ($self, $opts, $on_complete) = @_;
+    
+    $on_complete ||= sub {};
+
+    $self->do_when_created(sub {
+        $poe_kernel->post($self->{Alias}, server_send => 
+            Net::AMQP::Frame::Method->new(
+                synchronous_callback => sub {
+                    my $response_frame = $_[0]->method_frame;
+                    my $success         = $response_frame->isa('Net::AMQP::Protocol::Basic::QosOk');
+                    $on_complete->($success);
+                },
+                method_frame => Net::AMQP::Protocol::Basic::Qos->new(%$opts),
+            ),
+        );
+    });
+
+    return 1;
+}
+
 sub close {
     my $self = shift;
 
