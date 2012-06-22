@@ -455,7 +455,7 @@ sub compose_basic_publish {
     my $payload_size = length $payload;
     my @body_frames;
     while (length $payload) {
-        my $partial = substr $payload, 0, $self->frame_max, '';
+        my $partial = substr $payload, 0, $self->frame_max - 8, '';
         push @body_frames, Net::AMQP::Frame::Body->new(payload => $partial);
     }
 
