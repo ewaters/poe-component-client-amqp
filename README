@@ -88,14 +88,11 @@ USAGE
         The POE session alias of the TCP client
 
     *Callbacks* (default: {})
-        Provide callbacks. At the moment, 'Startup', 'ConnectError',
-        'Disconnected', and 'ServerError' are the only recognized callbacks.
+        Provide callbacks. At the moment, 'Startup' and 'FrameSent' are the
+        only recognized callback.
 
-        Example:
-
-          Callbacks => {
-             ConnectError => [ sub {  die join(", ",@_) }],
-          }
+        FrameSent will be called with $self and the Net::AMQP::Frame being
+        sent.
 
     *is_testing*
         Set to '1' to avoid creating POE::Sessions (mainly useful in t/

@@ -1,6 +1,5 @@
 Build.PL
 examples/ack.pl
-examples/clock.pl
 examples/examples.pm
 examples/pingpong.pl
 examples/clock.pl
@@ -8,9 +7,7 @@ examples/dequeue.pl
 examples/enqueue.pl
 examples/stocks.pl
 examples/README
-examples/stocks.pl
 lib/POE/Component/Client/AMQP.pm
-lib/POE/Component/Client/AMQP/Constants.pm
 lib/POE/Component/Client/AMQP/Channel.pm
 lib/POE/Component/Client/AMQP/Queue.pm
 lib/POE/Component/Client/AMQP/TCP.pm
@@ -22,4 +19,3 @@ README
 CHANGES
 t/01_basic.t
 META.json
-examples/stocknew.pl

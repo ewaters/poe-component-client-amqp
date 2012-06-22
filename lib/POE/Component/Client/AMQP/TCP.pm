@@ -113,7 +113,6 @@ sub new {
   my $error_callback      = delete $param{ServerError};
   my $flush_callback      = delete $param{ServerFlushed};
   my $start_callback      = delete $param{Started};
-  my $conn_retry_callback  = delete $param{ConnRetry};
   my $filter              = delete $param{Filter};
 
   # Extra states.
@@ -164,7 +163,6 @@ sub new {
   $conn_callback  = sub {} unless defined $conn_callback;
   $flush_callback = sub {} unless defined $flush_callback;
   $start_callback = sub {} unless defined $start_callback;
-  $conn_retry_callback = sub {} unless defined $conn_retry_callback;
 
   # Spawn the session that makes the connection and then interacts
   # with what was connected to.
@@ -217,10 +215,6 @@ sub new {
           $address = $new_address if defined $new_address;
           $port    = $new_port    if defined $new_port;
           $_[KERNEL]->yield("reconnect");
-        },
-		
-		reconnect_delayed => sub {
-                    $conn_retry_callback->(@_);
         },
 
         got_connect_success => sub {
