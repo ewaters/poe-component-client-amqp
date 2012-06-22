@@ -8,7 +8,7 @@ build_requires:
 configure_requires:
   Module::Build: 0.4
 dynamic_config: 1
-generated_by: 'Module::Build version 0.4, CPAN::Meta::Converter version 2.120921'
+generated_by: 'Module::Build version 0.4, CPAN::Meta::Converter version 2.120630'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -21,7 +21,13 @@ provides:
   POE::Component::Client::AMQP::Channel:
     file: lib/POE/Component/Client/AMQP/Channel.pm
     version: 0.02
+  POE::Component::Client::AMQP::Constants:
+    file: lib/POE/Component/Client/AMQP/Constants.pm
+    version: 0
   POE::Component::Client::AMQP::FakeLogger:
+    file: lib/POE/Component/Client/AMQP.pm
+    version: 0
+  POE::Component::Client::AMQP::Filter::Frame:
     file: lib/POE/Component/Client/AMQP.pm
     version: 0
   POE::Component::Client::AMQP::Queue:

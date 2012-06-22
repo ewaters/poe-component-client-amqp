@@ -38,25 +38,12 @@ use Params::Validate qw(validate validate_with);
 use Net::AMQP;
 use Net::AMQP::Common qw(:all);
 use Carp;
-use base qw(Exporter Class::Accessor);
+use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping frame_max));
 
 our $VERSION = 0.02;
 
-use constant {
-    AMQP_ACK    => '__amqp_ack__',
-    AMQP_REJECT => '__amqp_reject__',
-};
-
-my @_constants;
-our (@EXPORT_OK, %EXPORT_TAGS);
-BEGIN {
-    @_constants = qw(AMQP_ACK AMQP_REJECT);
-    @EXPORT_OK = (@_constants);
-    %EXPORT_TAGS = ('constants' => [@_constants]);
-};
-
-# Use libraries that require my constants after defining them
+use POE::Component::Client::AMQP::Constants;
 
 use POE qw(
     Filter::Stream
@@ -139,9 +126,13 @@ The POE session alias of the TCP client
 
 =item I<Callbacks> (default: {})
 
-Provide callbacks.  At the moment, 'Startup' and 'FrameSent' are the only recognized callback.
+Provide callbacks.  At the moment, 'Startup', 'ConnectError', 'Disconnected', and 'ServerError' are the only recognized callbacks.
 
-FrameSent will be called with $self and the Net::AMQP::Frame being sent.
+Example:
+
+  Callbacks => {
+     ConnectError => [ sub {  die join(", ",@_) }],
+  }
 
 =item I<is_testing>
 
@@ -159,27 +150,30 @@ sub create {
     my %self = validate_with(
         params => \@_,
         spec => {
-            RemoteAddress => { default => '127.0.0.1' },
-            RemotePort    => 0,
-            Username      => { default => 'guest' },
-            Password      => { default => 'guest' },
-            VirtualHost   => { default => '/' },
+            RemoteAddress     => { default => '127.0.0.1' },
+            RemotePort        => 0,
+            Username          => { default => 'guest' },
+            Password          => { default => 'guest' },
+            VirtualHost       => { default => '/' },
 
-            Logger        => 0,
-            Debug         => { default => {} },
+            Logger            => 0,
+            Debug             => { default => {} },
 
-            Alias         => { default => 'amqp_client' },
-            AliasTCP      => { default => 'tcp_client' },
-            Callbacks     => { default => {} },
-            SSL           => { default => 0 },
-            Keepalive     => { default => 0 },
-            Reconnect     => { default => 0 },
+            Alias             => { default => 'amqp_client' },
+            AliasTCP          => { default => 'tcp_client' },
+            Callbacks         => { default => {} },
+            SSL               => { default => 0 },
+            Keepalive         => { default => 0 },
+            Reconnect         => { default => 0 },
 
-            channels      => { default => {} },
-            is_started    => { default => 0 },
-            is_testing    => { default => 0 },
-            is_stopped    => { default => 0 },
-            frame_max     => { default => 0 },
+            AddressShuffle    => { default => 0 },
+            ConnectDelayMax   => { default => 60 },
+
+            channels          => { default => {} },
+            is_started        => { default => 0 },
+            is_testing        => { default => 0 },
+            is_stopped        => { default => 0 },
+            frame_max         => { default => 0 },
         },
         allow_extra => 1,
     );
@@ -220,6 +214,7 @@ sub create {
                 server_disconnect
                 shutdown
                 keepalive
+                _stop
             )],
         ],
     ) unless $self->{is_testing};
@@ -227,38 +222,48 @@ sub create {
     # If the user passed an arrayref as the RemoteAddress, pick one
     # at random to connect to.
     if (ref $self->{RemoteAddress}) {
-        # Shuffle the RemoteAddress array (thanks http://community.livejournal.com/perl/101830.html)
-        my $array = $self->{RemoteAddress};
-        for (my $i = @$array; --$i; ) {
-            my $j = int rand ($i+1);
-            next if $i == $j;
-            @$array[$i,$j] = @$array[$j,$i];
+        if ( $self->{AddressShuffle}) {
+            # Shuffle the RemoteAddress array (thanks http://community.livejournal.com/perl/101830.html)
+            my $array = $self->{RemoteAddress};
+            for (my $i = @$array; --$i; ) {
+                my $j = int rand ($i+1);
+                next if $i == $j;
+                @$array[$i,$j] = @$array[$j,$i];
+            }
         }
-
-        # Take the first shuffled address and move it to the back
+        # Take the first address and move it to the back
         $self->{current_RemoteAddress} = shift @{ $self->{RemoteAddress} };
         push @{ $self->{RemoteAddress} }, $self->{current_RemoteAddress};
     }
     else {
         $self->{current_RemoteAddress} = $self->{RemoteAddress};
     }
-
     POE::Component::Client::AMQP::TCP->new(
-        Alias          => $self->{AliasTCP},
-        RemoteAddress  => $self->{current_RemoteAddress},
-        RemotePort     => $self->{RemotePort},
-        Connected      => sub { $self->tcp_connected(@_) },
-        Disconnected   => sub { $self->tcp_disconnected(@_) },
-        ConnectError   => sub { $self->tcp_connect_error(@_) },
-        ConnectTimeout => 20,
-        ServerInput    => sub { $self->tcp_server_input(@_) },
-        ServerFlushed  => sub { $self->tcp_server_flush(@_) },
-        ServerError    => sub { $self->tcp_server_error(@_) },
-        Filter         => 'POE::Filter::Stream',
-        SSL            => $self->{SSL},
-        InlineStates   => {
-            reconnect_delayed => sub { $self->tcp_reconnect_delayed(@_) },
-        },
+        Alias         => $self->{AliasTCP},
+        RemoteAddress => $self->{current_RemoteAddress},
+        RemotePort    => $self->{RemotePort},
+        Connected     => sub { $self->tcp_connected(@_) },
+        Disconnected  => sub { $self->Logger->info("TCP connection is disconnected");
+                               if ($self->{Callbacks}{Disconnected}) {
+                                 $_->(@_) for @{$self->{Callbacks}{Disconnected}};
+                               }
+                               $self->tcp_disconnected(@_);
+                             },
+        ServerInput   => sub { $self->tcp_server_input(@_) },
+        ServerError   => sub { if ($self->{Callbacks}{ServerError}) {
+                                 $_->(@_) for @{$self->{Callbacks}{ServerError}};
+                               }
+                               $self->tcp_server_error(@_);
+                             },
+        ConnectError   => sub { if ($self->{Callbacks}{ConnectError}) {
+                                 $_->(@_) for @{$self->{Callbacks}{ConnectError}};
+                               }
+                               $self->tcp_connect_error(@_);
+                             },
+        ServerFlushed => sub { $self->tcp_server_flush(@_) },
+        Filter        => 'POE::Component::Client::AMQP::Filter::Frame',
+        SSL           => $self->{SSL},
+        ConnRetry =>sub { $self->tcp_reconnect_delayed(@_) },
     ) unless $self->{is_testing};
 
     return $self;
@@ -491,6 +496,8 @@ sub _start {
     $kernel->alias_set($self->{Alias});
 }
 
+sub _stop { 0 }
+
 =head2 server_disconnect
 
 =over 4
@@ -704,19 +711,6 @@ sub tcp_server_input {
     my $self = shift;
     my ($kernel, $heap, $input) = @_[KERNEL, HEAP, ARG0];
 
-    # FIXME: Not every record is complete; it may be split at 16384 bytes
-    # FIXME: Checking last octet is not best; find better way!
-    my $frame_end_octet = unpack 'C', substr $input, -1, 1;
-    if ($frame_end_octet != 206) {
-        $self->{Logger}->debug("Server input length ".length($input)." without frame end octet");
-        $self->{buffered_input} = '' unless defined $self->{buffered_input};
-        $self->{buffered_input} .= $input;
-        return;
-    }
-    elsif (defined $self->{buffered_input}) {
-        $input = delete($self->{buffered_input}) . $input;
-    }
-
     $self->{Logger}->debug("Server said: " . $self->{Debug}{raw_dumper}($input))
         if $self->{Debug}{raw_input};
 
@@ -833,16 +827,26 @@ sub tcp_server_error {
     if ($name eq 'read' && $num == 0 && $self->{is_stopping}) {
         return;
     }
-
+    $self->{is_stopped} = 1;
+    $self->{is_started} = 0;
+    $self->{wait_synchronous} = {};
     $self->{Logger}->error("TCP error: $name (num: $num, string: $string)");
+    if ($self->{Reconnect}) {
+        $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
+    }
 }
 
 sub tcp_connect_error {
     my $self = shift;
     my ($kernel, $heap, $name, $num, $string) = @_[KERNEL, HEAP, ARG0, ARG1, ARG2];
-
+    $self->{is_stopped} = 1;
+    $self->{is_started} = 0;
+    $self->{wait_synchronous} = {};
     $self->{Logger}->error("TCP connect error: $name (num: $num, string: $string)");
-    $kernel->post($self->{AliasTCP}, 'reconnect_delayed') if $self->{Reconnect};
+    if ($self->{Reconnect}) {
+        $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
+    }
+
 }
 
 sub tcp_disconnected {
@@ -863,7 +867,7 @@ sub tcp_disconnected {
         $kernel->post($self->{AliasTCP}, 'reconnect_delayed');
     }
 
-    $self->do_callback('Disconnected');
+    #$self->do_callback('Disconnected');
 }
 
 sub tcp_reconnect_delayed {
@@ -879,10 +883,13 @@ sub tcp_reconnect_delayed {
     }
 
     my $delay = 2 ** ++$self->{reconnect_attempt};
+    if ($delay > $self->{ConnectDelayMax}){
+        $delay = $self->{ConnectDelayMax};
+    }
     $self->{Logger}->info("Reconnecting to '$$self{current_RemoteAddress}' in $delay sec");
 
     # This state is in the TCP session, so we can call 'reconnect' directly
-    $kernel->delay('reconnect', $delay, $self->{current_RemoteAddress}, $self->{RemotePort});
+    $kernel->delay('connect', $delay, $self->{current_RemoteAddress}, $self->{RemotePort});
 }
 
 sub do_callback {
@@ -893,6 +900,16 @@ sub do_callback {
         $subref->($self, @args);
     }
     return;
+}
+
+{
+    package POE::Component::Client::AMQP::Filter::Frame;
+    our @ISA = qw(POE::Filter::Stream);
+    sub get_one {
+	my $self = shift;
+        my $size = Net::AMQP->next_raw_frame_size($self);
+	return $size > 0 ? [ substr($$self, 0, $size, '') ] : [ ];
+    }
 }
 
 {

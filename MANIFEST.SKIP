@@ -46,5 +46,9 @@
 \B\._
 # Avoid archives of this distribution
 \bPOE-Component-Client-AMQP-[\d\.\_]+
+<<<<<<< HEAD
 ^MYMETA\.yml$
 ^MYMETA\.json$
+=======
+.gitignore
+>>>>>>> 0e26c586778521e961efdf7251bba87e327d5324

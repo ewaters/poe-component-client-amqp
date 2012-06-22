@@ -15,7 +15,7 @@ use warnings;
 use POE;
 use Params::Validate;
 use Carp;
-use POE::Component::Client::AMQP qw(:constants);
+use POE::Component::Client::AMQP::Constants;
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(id server Alias));
 
@@ -111,6 +111,7 @@ sub create {
                 server_input
                 server_send
                 channel_created
+                _stop
             )],
         ],
     );
@@ -187,6 +188,61 @@ sub send_frames {
     $self->do_when_created(sub {
         $poe_kernel->post($self->{Alias}, server_send => @frames);
     });
+}
+
+=head2 ack
+
+  $channel->ack($delivery_tag_or_meta,\%opts);
+
+Send a Basic.Ack message. Hand it a delivery_tag or the meta data of the message to acknowledge. The default for %opts is C<multiple => 0>
+
+See L<POE::Component::Client::AMQP::Queue/subscribe>.
+
+=cut
+
+
+sub ack {
+  my ($self,$tag,$in_opts) = @_;
+  if (ref $tag) {
+    $tag = $tag->{method_frame}->delivery_tag;
+  }
+  $in_opts ||= {};
+  my %opts = (
+    multiple => 0,
+    %$in_opts
+  );
+  $self->send_frames(
+    Net::AMQP::Protocol::Basic::Ack->new(
+      delivery_tag => $tag,
+      %opts
+    )
+  );
+}
+
+=head2 reject
+
+ $channel->reject($delivery_tag_or_meta,\%opts);
+
+Like ack() only it sends a Basic.Reject message. The default for %opts is C<requeue => 1>
+
+=cut
+
+sub reject {
+  my ($self,$tag,$in_opts) = @_;
+  if (ref $tag) {
+    $tag = $tag->{method_frame}->delivery_tag;
+  }
+  $in_opts ||= {};
+  my %opts = (
+    requeue => 1,
+    %$in_opts
+  );
+  $self->send_frames(
+    Net::AMQP::Protocol::Basic::Reject->new(
+      delivery_tag => $tag,
+      %opts
+    )
+  );
 }
 
 ### Deferred methods ###
@@ -291,6 +347,85 @@ sub qos {
     return 1;
 }
 
+=head2 exchange( $name, \%opts )
+
+Creates a new exchange called $name.  Returns 1.
+
+=cut
+
+sub exchange {
+    my ($self, $name, $user_opts) = @_;
+    $user_opts ||= {};
+
+    if (defined $name && $self->{exchanges}{$name}) {
+        return $self->{exchanges}{$name};
+    }
+
+    my %opts = (
+        ticket      => 0,
+        exchange      => (defined $name ? $name : ''),
+        #passive     => 0, # if set, server will not create the queue; checks for existance
+        #durable     => 0, # will remain active after restart
+        auto_delete => 1, # queue is deleted after the last consumer
+        #nowait      => 0, # do not send a DeclareOk response
+        #arguments   => {},
+        %$user_opts,
+    );
+
+
+    # Remember it here if we have a name; otherwise wait for the callback
+    $self->{exchanges}{$name} = 1 if defined $name;
+
+    $self->do_when_created(sub {
+        $poe_kernel->post($self->{Alias}, server_send => 
+            Net::AMQP::Frame::Method->new(
+                synchronous_callback => sub {
+                    if (! defined $name) {
+                        my $response_frame = $_[0]->method_frame;
+                        $self->{exchanges}{ $response_frame->exchange } = 1;
+                    }
+                },
+                method_frame => Net::AMQP::Protocol::Exchange::Declare->new(%opts),
+            ),
+        );
+    });
+
+    return 1;
+}
+
+=head2 publish ($message, \%opts)
+
+=over 4
+
+Sends a message. In other words, sends a L<Net::AMQP::Protocol::Basic::Publish> followed by a L<Net::AMQP::Protocol::Basic::ContentHeader> and L<Net::AMQP::Frame::Body> containing the body of the message.
+
+Optionally pass %opts, which can override any option in the L<Net::AMQP::Protocol::Basic::Publish> ('ticket', 'exchange', 'routing_key', 'mandatory', 'immediate'), L<Net::AMQP::Frame::Header> ('weight') or L<Net::AMQP::Protocol::Basic::ContentHeader> ('content_type', 'content_encoding', 'headers', 'delivery_mode', 'priority', 'correlation_id', 'reply_to', 'expiration', 'message_id', 'timestamp', 'type', 'user_id', 'app_id', 'cluster_id') objects.  See the related documentation for an explaination of each.
+
+You will likely want to set exchange or routing_key or both.
+
+=back
+
+=cut
+
+sub publish {
+    my ($self, $message, $user_opts) = @_;
+    $user_opts ||= {};
+
+    $self->do_when_created(sub {
+        my %opts = (
+            content_type => 'application/octet-stream',
+            %$user_opts,
+        );
+
+        $poe_kernel->post($self->{Alias}, server_send => 
+            $self->{server}->compose_basic_publish($message, %opts)
+        );
+    });
+
+    return $self;
+}
+
+
 sub close {
     my $self = shift;
 
@@ -325,6 +460,8 @@ sub _start {
         );
     });
 }
+
+sub _stop {}
 
 sub channel_created {
     my ($self, $kernel) = @_[OBJECT, KERNEL];
@@ -467,7 +604,9 @@ sub server_input {
             $content_meta->{$_} = $consumer_data->{$_} foreach qw(queue opts);
 
             # Let the consumer know via the recorded callback
-            my $callback_return = $consumer_data->{callback}($content_meta->{payload}, $content_meta);
+            my $callback_return = $consumer_data->{callback}($content_meta->{payload},
+							     $content_meta,
+							     $content_meta->{method_frame}->delivery_tag);
 
             # The return value is normally ignored unless the Consume call had 'no_ack => 0',
             # in which case a 'true' response from the callback will automatically ack
