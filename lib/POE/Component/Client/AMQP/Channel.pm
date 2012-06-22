@@ -19,7 +19,7 @@ use POE::Component::Client::AMQP qw(:constants);
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(id server Alias));
 
-our $VERSION = 0.02;
+our $VERSION = 0.03;
 
 =head1 CLASS METHODS 
 

@@ -18,7 +18,7 @@ use Params::Validate qw(validate_with);
 use base qw(Class::Accessor);
 __PACKAGE__->mk_accessors(qw(name channel is_created));
 
-our $VERSION = 0.02;
+our $VERSION = 0.03;
 
 =head1 CLASS METHODS
 

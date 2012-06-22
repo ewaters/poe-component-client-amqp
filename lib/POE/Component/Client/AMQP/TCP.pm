@@ -26,7 +26,7 @@ from Jos Boumans E<lt>kane@cpan.orgE<gt>.
 use strict;
 
 use vars qw($VERSION);
-$VERSION = 0.02;
+$VERSION = 0.03;
 
 use Carp qw(carp croak);
 use Errno qw(ETIMEDOUT ECONNRESET EAGAIN);

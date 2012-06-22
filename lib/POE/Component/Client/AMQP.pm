@@ -41,7 +41,7 @@ use Carp;
 use base qw(Exporter Class::Accessor);
 __PACKAGE__->mk_accessors(qw(Logger is_stopped is_started is_stopping frame_max));
 
-our $VERSION = 0.02;
+our $VERSION = 0.03;
 
 use constant {
     AMQP_ACK    => '__amqp_ack__',
