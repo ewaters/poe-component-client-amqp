@@ -362,19 +362,7 @@ sub server_input {
         }
         elsif ($method_frame->isa('Net::AMQP::Protocol::Channel::Close')) {
             # Come up with a descriptive reason why the channel closed
-
-            my $close_reason;
-            # If the Channel.Close event gives class and method id indicating what event cause the closure, find a
-            # friendly name from this and use it in the close reason
-            if ($method_frame->class_id && $method_frame->method_id) {
-                my $method_class = Net::AMQP::Frame::Method->registered_method_class($method_frame->class_id, $method_frame->method_id);
-                my ($class_name, $method_name) = $method_class =~ m{^Net::AMQP::Protocol::(.+)::(.+)$};
-                $close_reason = "The method $class_name.$method_name caused channel " . $self->id . ' to be';
-            }
-            else {
-                $close_reason = "The channel has been";
-            }
-            $close_reason .= ' closed by the server: ' . $method_frame->reply_code . ': ' . $method_frame->reply_text;
+            my $close_reason = 'The channel has been closed by the server: ' . $method_frame->reply_code . ': ' . $method_frame->reply_text;
 
             $self->server->{Logger}->error($close_reason);
 
