@@ -179,6 +179,7 @@ sub create {
             is_started    => { default => 0 },
             is_testing    => { default => 0 },
             is_stopped    => { default => 0 },
+            channel_max   => { default => 0 },
             frame_max     => { default => 0 },
         },
         allow_extra => 1,
@@ -796,10 +797,11 @@ sub tcp_server_input {
                     $handled++;
                 }
                 elsif ($method_frame->isa('Net::AMQP::Protocol::Connection::Tune')) {
+                    $self->{channel_max} = $method_frame->channel_max;
                     $self->{frame_max} = $method_frame->frame_max;
                     $kernel->post($self->{Alias}, server_send =>
                         Net::AMQP::Protocol::Connection::TuneOk->new(
-                            channel_max => 0,
+                            channel_max => $method_frame->channel_max,
                             frame_max => $method_frame->frame_max,
                             heartbeat => 0,
                         ),
